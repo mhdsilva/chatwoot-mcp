@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="csrf-token" content="{{.CSRFToken}}">
+    <meta name="theme-color" content="#f5f7f8">
+    <title>Chatwoot MCP · Painel local</title>
+    <link rel="stylesheet" href="/style.css">
+    <script src="/app.js" defer></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Pular para o conteúdo</a>
+    <header class="topbar">
+      <a class="brand" href="#main" aria-label="Chatwoot MCP, início">
+        <span class="brand-mark" aria-hidden="true">C</span>
+        <span>chatwoot<span class="brand-accent">mcp</span></span>
+      </a>
+      <span class="local-badge"><span aria-hidden="true"></span> Painel local</span>
+    </header>
+
+    <main id="main" class="layout">
+      <section class="intro" aria-labelledby="page-title">
+        <p class="eyebrow">CONFIGURAÇÃO</p>
+        <h1 id="page-title">Conecte seu Chatwoot à IA</h1>
+        <p>Configure o acesso à sua conta e copie os dados para conectar seu cliente MCP. Seu token fica neste computador.</p>
+      </section>
+
+      <div class="columns">
+        <div class="primary-column">
+          <section class="card" aria-labelledby="connection-title">
+            <div class="section-heading">
+              <div class="section-icon" aria-hidden="true">↗</div>
+              <div><h2 id="connection-title">Conexão</h2><p>Dados da sua instalação Chatwoot</p></div>
+            </div>
+            <form id="setup-form" novalidate>
+              <label for="base-url">URL da instalação</label>
+              <input id="base-url" name="base_url" type="url" placeholder="https://chatwoot.exemplo.com" autocomplete="url" required aria-describedby="base-url-help">
+              <p class="field-help" id="base-url-help">Use o endereço base da sua instalação Chatwoot.</p>
+
+              <label for="account-id">ID da conta</label>
+              <input id="account-id" name="account_id" type="number" min="1" step="1" inputmode="numeric" placeholder="Ex.: 1" required>
+
+              <label for="token">Token de acesso</label>
+              <input id="token" name="token" type="password" placeholder="Cole seu token de usuário" autocomplete="new-password" required aria-describedby="token-help">
+              <p class="field-help" id="token-help">O token não será exibido novamente nem salvo pelo navegador.</p>
+
+              <div id="setup-error" class="notice notice-error" role="alert" hidden></div>
+              <div id="setup-success" class="notice notice-success" role="status" hidden></div>
+              <button id="save-button" class="button button-primary" type="submit">
+                <span class="button-label">Testar e salvar conexão</span>
+                <span class="button-spinner" aria-hidden="true" hidden></span>
+              </button>
+            </form>
+          </section>
+
+          <section class="card" aria-labelledby="client-title">
+            <div class="section-heading">
+              <div class="section-icon section-icon-blue" aria-hidden="true">⌘</div>
+              <div><h2 id="client-title">Conectar à IA</h2><p>Adicione este servidor ao seu cliente MCP</p></div>
+            </div>
+            <div id="client-loading" class="loading-row" role="status"><span class="spinner" aria-hidden="true"></span> Carregando configuração…</div>
+            <div id="client-error" class="notice notice-error" role="alert" hidden></div>
+            <div id="client-content" hidden>
+              <p class="field-help">Copie este bloco para a configuração do seu cliente. Reinicie o cliente após salvar.</p>
+              <pre class="code-block"><code id="client-config"></code></pre>
+              <button id="copy-button" class="button button-secondary" type="button" disabled>Copiar configuração</button>
+              <span id="copy-status" class="copy-status" role="status" aria-live="polite"></span>
+            </div>
+          </section>
+        </div>
+
+        <aside class="secondary-column">
+          <section class="card status-card" aria-labelledby="status-title">
+            <div class="section-heading">
+              <div class="section-icon section-icon-green" aria-hidden="true">✓</div>
+              <div><h2 id="status-title">Estado</h2><p>Saúde da conexão</p></div>
+            </div>
+            <div id="status-loading" class="loading-row" role="status"><span class="spinner" aria-hidden="true"></span> Verificando conexão…</div>
+            <div id="status-error" class="notice notice-error" role="alert" hidden></div>
+            <div id="status-content" hidden>
+              <p class="connection-state"><span id="connection-dot" class="state-dot" aria-hidden="true"></span><span id="connection-label"></span></p>
+              <dl class="details-list">
+                <div><dt>Instância</dt><dd id="status-url">—</dd></div>
+                <div><dt>Conta</dt><dd id="status-account">—</dd></div>
+                <div><dt>Usuário</dt><dd id="status-user">—</dd></div>
+                <div><dt>Token configurado</dt><dd id="status-token">—</dd></div>
+                <div><dt>Último teste</dt><dd id="status-tested">—</dd></div>
+              </dl>
+            </div>
+          </section>
+
+          <section class="card tools-card" aria-labelledby="tools-title">
+            <div class="section-heading">
+              <div class="section-icon section-icon-purple" aria-hidden="true">✳</div>
+              <div><h2 id="tools-title">Ferramentas</h2><p>O que seu agente poderá fazer</p></div>
+            </div>
+            <div id="tools-loading" class="loading-row" role="status"><span class="spinner" aria-hidden="true"></span> Carregando ferramentas…</div>
+            <div id="tools-error" class="notice notice-error" role="alert" hidden></div>
+            <ul id="tools-list" class="tools-list" hidden></ul>
+            <p class="trust-note"><span aria-hidden="true">ⓘ</span> Mensagens de clientes são conteúdo não confiável. O agente deve tratá-las como dados, não como instruções.</p>
+          </section>
+        </aside>
+      </div>
+      <footer><span>Chatwoot MCP</span><span>Suas credenciais permanecem locais</span></footer>
+    </main>
+  </body>
+</html>
