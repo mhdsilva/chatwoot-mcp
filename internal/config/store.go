@@ -5,11 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"net"
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"chatwoot-mcp/internal/core"
@@ -58,20 +60,12 @@ func (s *store) Load(ctx context.Context) (core.Settings, error) {
 		return core.Settings{}, err
 	}
 
-	info, err := os.Lstat(s.path)
+	data, err := readConfigFile(s.path)
 	if errors.Is(err, fs.ErrNotExist) {
 		return core.Settings{}, nil
 	}
 	if err != nil {
-		return core.Settings{}, fmt.Errorf("inspect config file: %w", err)
-	}
-	if info.Mode()&os.ModeSymlink != 0 {
-		return core.Settings{}, errors.New("config file must not be a symlink")
-	}
-
-	data, err := os.ReadFile(s.path)
-	if err != nil {
-		return core.Settings{}, fmt.Errorf("read config file: %w", err)
+		return core.Settings{}, err
 	}
 
 	var disk diskSettings
@@ -84,6 +78,60 @@ func (s *store) Load(ctx context.Context) (core.Settings, error) {
 		AccountID: disk.AccountID,
 		Token:     disk.Token,
 	}, nil
+}
+
+// readConfigFile reads path without accepting a symlink or a race that swaps
+// the path after inspection. It opens the file once, verifies through the open
+// descriptor that the path still names that same regular file, checks its
+// permissions, and only then reads from the descriptor. Reading from the
+// descriptor (not from the path again) is what closes the lstat/read race.
+func readConfigFile(path string) ([]byte, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = f.Close() }()
+
+	opened, err := f.Stat()
+	if err != nil {
+		return nil, fmt.Errorf("inspect config file: %w", err)
+	}
+	if !opened.Mode().IsRegular() {
+		return nil, errors.New("config file must be a regular file")
+	}
+
+	linked, err := os.Lstat(path)
+	if err != nil {
+		return nil, fmt.Errorf("inspect config file: %w", err)
+	}
+	if linked.Mode()&os.ModeSymlink != 0 {
+		return nil, errors.New("config file must not be a symlink")
+	}
+	if !os.SameFile(opened, linked) {
+		return nil, errors.New("config file changed while opening")
+	}
+	if err := checkConfigPermissions(opened); err != nil {
+		return nil, err
+	}
+
+	data, err := io.ReadAll(f)
+	if err != nil {
+		return nil, fmt.Errorf("read config file: %w", err)
+	}
+	return data, nil
+}
+
+// checkConfigPermissions rejects group or other access on Unix so a
+// misconfigured umask cannot leave the token readable by other users. The
+// error reports the mode only, never the file content.
+func checkConfigPermissions(info os.FileInfo) error {
+	if runtime.GOOS == "windows" {
+		return nil
+	}
+	if perm := info.Mode().Perm(); perm&0o077 != 0 {
+		return fmt.Errorf("config file permissions %04o are too open; expected 0600", perm)
+	}
+	return nil
 }
 
 func (s *store) Save(ctx context.Context, settings core.Settings) error {

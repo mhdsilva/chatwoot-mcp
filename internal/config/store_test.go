@@ -238,6 +238,89 @@ func TestLoadRejectsSymlink(t *testing.T) {
 	}
 }
 
+func TestLoadRejectsSymlinkToOwnerOnlyValidConfig(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlinks not reliably available")
+	}
+	const secret = "super-secret-token-value"
+	dir := t.TempDir()
+	target := filepath.Join(dir, "target.json")
+	settings := validSettings()
+	settings.Token = secret
+	if err := config.NewStore(target).Save(context.Background(), settings); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	link := filepath.Join(dir, "config.json")
+	if err := os.Symlink(target, link); err != nil {
+		if errors.Is(err, syscall.EPERM) {
+			t.Skipf("symlinks not permitted: %v", err)
+		}
+		t.Fatalf("symlink: %v", err)
+	}
+
+	got, err := config.NewStore(link).Load(context.Background())
+	if err == nil {
+		t.Fatalf("expected symlink rejection, got %+v", got.Public())
+	}
+	if got.Token != "" {
+		t.Fatalf("symlinked config was accepted: %+v", got.Public())
+	}
+	if strings.Contains(err.Error(), secret) {
+		t.Fatalf("error leaked token: %v", err)
+	}
+}
+
+func TestLoadRejectsGroupOrOtherAccessibleFile(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("unix permission bits")
+	}
+	const secret = "super-secret-token-value"
+	modes := []os.FileMode{0o640, 0o604, 0o644, 0o660, 0o607, 0o666}
+
+	for _, mode := range modes {
+		t.Run(mode.String(), func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "config.json")
+			settings := validSettings()
+			settings.Token = secret
+			if err := config.NewStore(path).Save(context.Background(), settings); err != nil {
+				t.Fatalf("save: %v", err)
+			}
+			if err := os.Chmod(path, mode); err != nil {
+				t.Fatalf("chmod: %v", err)
+			}
+
+			got, err := config.NewStore(path).Load(context.Background())
+			if err == nil {
+				t.Fatalf("expected permission rejection for %04o, got %+v", mode, got.Public())
+			}
+			if strings.Contains(err.Error(), secret) {
+				t.Fatalf("error leaked token: %v", err)
+			}
+		})
+	}
+}
+
+func TestLoadAcceptsOwnerOnlyFile(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("unix permission bits")
+	}
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := config.NewStore(path).Save(context.Background(), validSettings()); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	if err := os.Chmod(path, 0o600); err != nil {
+		t.Fatalf("chmod: %v", err)
+	}
+
+	got, err := config.NewStore(path).Load(context.Background())
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if got.Token != "secret" || got.AccountID != 7 {
+		t.Fatalf("load: %+v", got.Public())
+	}
+}
+
 func TestLoadMissingFileIsUnconfigured(t *testing.T) {
 	got, err := config.NewStore(filepath.Join(t.TempDir(), "missing.json")).Load(context.Background())
 	if err != nil {
