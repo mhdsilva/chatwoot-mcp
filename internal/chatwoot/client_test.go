@@ -409,3 +409,86 @@ func TestErrorStringIncludesResource(t *testing.T) {
 		t.Fatal("empty error string")
 	}
 }
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+type timeoutError struct{}
+
+func (timeoutError) Error() string   { return "read tcp: i/o timeout" }
+func (timeoutError) Timeout() bool   { return true }
+func (timeoutError) Temporary() bool { return true }
+
+type failingBody struct {
+	chunks [][]byte
+	err    error
+}
+
+func (b *failingBody) Read(p []byte) (int, error) {
+	if len(b.chunks) == 0 {
+		return 0, b.err
+	}
+	chunk := b.chunks[0]
+	n := copy(p, chunk)
+	if n < len(chunk) {
+		b.chunks[0] = chunk[n:]
+		return n, nil
+	}
+	b.chunks = b.chunks[1:]
+	return n, nil
+}
+
+func (b *failingBody) Close() error { return nil }
+
+func TestRedirectsAreNotFollowed(t *testing.T) {
+	for _, status := range []int{http.StatusTemporaryRedirect, http.StatusPermanentRedirect} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			var targetHits int
+			target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				targetHits++
+				_, _ = w.Write([]byte(`{"id":500,"content":"Olá"}`))
+			}))
+			defer target.Close()
+
+			var sourceHits int
+			source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				sourceHits++
+				http.Redirect(w, r, target.URL+r.URL.Path, status)
+			}))
+			defer source.Close()
+
+			base := source.Client()
+			c := NewClient(core.Settings{BaseURL: source.URL, AccountID: 7, Token: testToken}, base)
+
+			_, err := c.CreateMessage(context.Background(), 42, "Olá")
+			requireKind(t, err, KindTransport)
+			if sourceHits != 1 {
+				t.Fatalf("source hits = %d, want 1", sourceHits)
+			}
+			if targetHits != 0 {
+				t.Fatalf("redirect target contacted %d times; POST was replayed and token may have leaked", targetHits)
+			}
+			if base.CheckRedirect != nil {
+				t.Fatal("caller's http.Client was mutated")
+			}
+		})
+	}
+}
+
+func TestResponseBodyTimeoutIsTimeout(t *testing.T) {
+	client := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       &failingBody{chunks: [][]byte{[]byte(`{"id":7,`)}, err: timeoutError{}},
+		}, nil
+	})}
+
+	c := NewClient(core.Settings{BaseURL: "https://chatwoot.example", AccountID: 7, Token: testToken}, client)
+	_, err := c.GetConversation(context.Background(), 42)
+	requireKind(t, err, KindTimeout)
+	if !IsTimeout(err) {
+		t.Fatalf("IsTimeout = false for %v", err)
+	}
+}

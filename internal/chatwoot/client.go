@@ -1,7 +1,8 @@
 // Package chatwoot implements the subset of the Chatwoot Application API used
 // by the v1 MCP server. It authenticates with the api_access_token header and
 // speaks to /api/v1/accounts/{account_id}. The client never retries requests
-// automatically, so a POST that may have reached Chatwoot is never duplicated.
+// and never follows redirects, so a POST that may have reached Chatwoot is
+// neither duplicated nor replayed against another host.
 package chatwoot
 
 import (
@@ -131,11 +132,18 @@ func NewClient(settings core.Settings, httpClient *http.Client) *Client {
 	if httpClient == nil {
 		httpClient = &http.Client{Timeout: defaultTimeout}
 	}
+	// Work on a copy so the caller's client is left untouched. Errors like
+	// ErrUseLastResponse stop the transport from following any redirect, so a
+	// POST is never replayed and the token never reaches another host.
+	noRedirect := *httpClient
+	noRedirect.CheckRedirect = func(*http.Request, []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
 	return &Client{
 		baseURL:    strings.TrimRight(settings.BaseURL, "/"),
 		accountID:  settings.AccountID,
 		token:      settings.Token,
-		httpClient: httpClient,
+		httpClient: &noRedirect,
 	}
 }
 
@@ -187,28 +195,43 @@ func (c *Client) call(ctx context.Context, method, path string, query url.Values
 	if resp.StatusCode >= 400 {
 		return responseError(resp, resource)
 	}
+	if resp.StatusCode >= 300 {
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, maxErrorBodyBytes))
+		message := "unexpected redirect"
+		if location := resp.Header.Get("Location"); location != "" {
+			message += " to " + location
+		}
+		return &Error{Kind: KindTransport, StatusCode: resp.StatusCode, Resource: resource, Message: message}
+	}
 	if resBody == nil {
 		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, maxResponseBytes))
 		return nil
 	}
 	if err := json.NewDecoder(io.LimitReader(resp.Body, maxResponseBytes)).Decode(resBody); err != nil {
+		if isTimeoutError(ctx, err) {
+			return &Error{Kind: KindTimeout, StatusCode: resp.StatusCode, Resource: resource, Message: err.Error()}
+		}
 		return &Error{Kind: KindInvalid, StatusCode: resp.StatusCode, Resource: resource, Message: "decode response: " + err.Error()}
 	}
 	return nil
 }
 
 func transportError(ctx context.Context, err error, resource string) *Error {
-	if errors.Is(err, context.DeadlineExceeded) {
-		return &Error{Kind: KindTimeout, Resource: resource, Message: err.Error()}
-	}
-	var netErr net.Error
-	if errors.As(err, &netErr) && netErr.Timeout() {
-		return &Error{Kind: KindTimeout, Resource: resource, Message: err.Error()}
-	}
-	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+	if isTimeoutError(ctx, err) {
 		return &Error{Kind: KindTimeout, Resource: resource, Message: err.Error()}
 	}
 	return &Error{Kind: KindTransport, Resource: resource, Message: err.Error()}
+}
+
+func isTimeoutError(ctx context.Context, err error) bool {
+	if errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return true
+	}
+	return errors.Is(ctx.Err(), context.DeadlineExceeded)
 }
 
 func responseError(resp *http.Response, resource string) error {
