@@ -1,0 +1,9 @@
+.worktrees/
+.superpowers/
+bin/
+dist/
+*.exe
+*.test
+coverage.out
+config.json
+*.log
