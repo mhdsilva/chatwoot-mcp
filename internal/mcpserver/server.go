@@ -278,26 +278,54 @@ func fail[T any](err error) (*mcp.CallToolResult, result[T], error) {
 	return &mcp.CallToolResult{IsError: true}, out, nil
 }
 
-// errorPayloadFrom keeps the service code machine-readable and never includes
-// credentials, because neither the service nor the API client carries a token
-// in an error. The readable message is bounded to MaxErrorBytes; the code is
-// always preserved exactly.
+// errorPayloadFrom never echoes upstream text: svcErr.Message, err.Error() and
+// HTTP bodies can contain an unexpected secret, so the adapter emits a fixed,
+// useful human message chosen by the machine-readable code. The code is always
+// preserved exactly and the fixed messages stay well under MaxErrorBytes, which
+// makes the error output deterministic.
 func errorPayloadFrom(err error) (*errorPayload, bool) {
+	code := errorCodeOf(err)
+	return boundedError(string(code), fixedErrorMessage(code))
+}
+
+func errorCodeOf(err error) service.Code {
 	var svcErr *service.Error
 	if errors.As(err, &svcErr) {
-		message := svcErr.Message
-		if message == "" && svcErr.APIError != nil {
-			message = svcErr.APIError.Error()
-		}
-		if message == "" {
-			message = svcErr.Error()
-		}
-		return boundedError(string(svcErr.Code), message)
+		return svcErr.Code
 	}
 	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
-		return boundedError(string(service.CodeTimeout), err.Error())
+		return service.CodeTimeout
 	}
-	return boundedError(string(service.CodeUpstream), err.Error())
+	return service.CodeUpstream
+}
+
+// fixedErrorMessage maps a service code to a safe, actionable message. It must
+// not include any data from the failing request or response.
+func fixedErrorMessage(code service.Code) string {
+	switch code {
+	case service.CodeInvalidInput:
+		return "the request arguments are invalid; check the ids and text fields and try again"
+	case service.CodeCannotReply:
+		return "the conversation cannot accept a reply right now"
+	case service.CodeConversationMismatch:
+		return "the requested conversation id does not match the conversation returned by Chatwoot"
+	case service.CodeDeliveryUnknown:
+		return "reply delivery is unknown; check the conversation before retrying"
+	case service.CodeUnauthorized:
+		return "Chatwoot rejected the credentials; check the token configured in the panel"
+	case service.CodeForbidden:
+		return "the configured user is not allowed to perform this action"
+	case service.CodeNotFound:
+		return "the requested resource was not found; check the id"
+	case service.CodeRateLimited:
+		return "Chatwoot rate limited the request; wait before trying again"
+	case service.CodeTimeout:
+		return "the request to Chatwoot timed out; try again"
+	case service.CodeUpstream:
+		return "Chatwoot returned an unexpected error; check the connection and try again"
+	default:
+		return "the operation failed; check the connection and try again"
+	}
 }
 
 func boundedError(code, message string) (*errorPayload, bool) {

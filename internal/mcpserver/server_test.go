@@ -15,6 +15,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"chatwoot-mcp/internal/chatwoot"
 	"chatwoot-mcp/internal/core"
 	"chatwoot-mcp/internal/service"
 )
@@ -112,13 +113,15 @@ func (f *fakeService) SendReply(_ context.Context, id int64, content string) (se
 	return f.sendResult, f.sendErr
 }
 
-// fakeAPI is a minimal core.API used to exercise the real service bounding.
+// fakeAPI is a minimal core.API used to exercise the real service bounding and
+// to inject upstream failures.
 type fakeAPI struct {
-	getConv core.Conversation
-	getErr  error
+	checkErr error
+	getConv  core.Conversation
+	getErr   error
 }
 
-func (f *fakeAPI) Check(context.Context) (core.Identity, error) { return core.Identity{}, nil }
+func (f *fakeAPI) Check(context.Context) (core.Identity, error) { return core.Identity{}, f.checkErr }
 
 func (f *fakeAPI) ListConversations(context.Context, core.ListOptions) (core.Page[core.Conversation], error) {
 	return core.Page[core.Conversation]{}, nil
@@ -771,8 +774,9 @@ func TestSendReplyTruncatesEchoedStatus(t *testing.T) {
 	}
 }
 
-func TestErrorTextIsBounded(t *testing.T) {
-	huge := strings.Repeat("界", 1000) // 3000 bytes
+func TestErrorTextIsFixedAndDoesNotEchoUpstream(t *testing.T) {
+	const secret = "super-secret-token-value"
+	huge := "upstream said: " + secret + " " + strings.Repeat("界", 1000)
 	fake := &fakeService{checkErr: &service.Error{Code: service.CodeUpstream, Message: huge}}
 	session, ctx := connectSession(t, fake)
 
@@ -791,14 +795,84 @@ func TestErrorTextIsBounded(t *testing.T) {
 		t.Fatalf("code = %v, want %q (code must stay exact)", e["code"], service.CodeUpstream)
 	}
 	message, _ := e["message"].(string)
+	if message != fixedErrorMessage(service.CodeUpstream) {
+		t.Fatalf("message = %q, want the fixed %q message", message, fixedErrorMessage(service.CodeUpstream))
+	}
 	if len(message) > MaxErrorBytes {
 		t.Fatalf("error message = %d bytes, want <= %d", len(message), MaxErrorBytes)
 	}
 	if !utf8.ValidString(message) {
 		t.Fatalf("error message is not valid UTF-8")
 	}
-	if structuredEnvelope(t, res)["text_truncated"] != true {
-		t.Fatalf("text_truncated = false, want true for an oversized error message")
+	blob, _ := json.Marshal(res)
+	if strings.Contains(string(blob), secret) {
+		t.Fatalf("upstream secret leaked into result: %s", blob)
+	}
+	if strings.Contains(resultText(res), secret) {
+		t.Fatalf("upstream secret leaked into content text: %s", resultText(res))
+	}
+	if structuredEnvelope(t, res)["text_truncated"] != false {
+		t.Fatalf("text_truncated = %v, want false for a fixed message", structuredEnvelope(t, res)["text_truncated"])
+	}
+}
+
+func TestAPIErrorSecretNeverReachesMCPResult(t *testing.T) {
+	const secret = "super-secret-token-value"
+	api := &fakeAPI{checkErr: &chatwoot.Error{
+		Kind:       chatwoot.KindServer,
+		StatusCode: 500,
+		Resource:   "account 7 profile",
+		Message:    "upstream body: " + secret,
+	}}
+	session, ctx := connectSession(t, service.New(api))
+
+	res, err := session.CallTool(ctx, &mcp.CallToolParams{
+		Name:      "check_connection",
+		Arguments: map[string]any{},
+	})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	if !res.IsError {
+		t.Fatalf("IsError = false, want true for an upstream failure")
+	}
+	if got := structuredError(t, res)["code"]; got != string(service.CodeUpstream) {
+		t.Fatalf("code = %v, want %q", got, service.CodeUpstream)
+	}
+	blob, _ := json.Marshal(res)
+	if strings.Contains(string(blob), secret) {
+		t.Fatalf("API body secret leaked into MCP result: %s", blob)
+	}
+	if strings.Contains(resultText(res), secret) {
+		t.Fatalf("API body secret leaked into content text: %s", resultText(res))
+	}
+}
+
+func TestDeliveryUnknownMessageTellsToCheckBeforeRetry(t *testing.T) {
+	const secret = "super-secret-token-value"
+	fake := &fakeService{sendErr: &service.Error{
+		Code:    service.CodeDeliveryUnknown,
+		Message: "delivery detail " + secret,
+	}}
+	session, ctx := connectSession(t, fake)
+
+	res, err := session.CallTool(ctx, &mcp.CallToolParams{
+		Name:      "send_reply",
+		Arguments: map[string]any{"conversation_id": 42, "content": "Olá"},
+	})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	if !res.IsError {
+		t.Fatalf("IsError = false, want true")
+	}
+	message, _ := structuredError(t, res)["message"].(string)
+	lower := strings.ToLower(message)
+	if !strings.Contains(lower, "check the conversation") || !strings.Contains(lower, "retry") {
+		t.Fatalf("delivery_unknown message = %q, want it to tell the caller to check the conversation before retrying", message)
+	}
+	if strings.Contains(message, secret) {
+		t.Fatalf("delivery_unknown message echoed upstream text: %q", message)
 	}
 }
 
