@@ -13,6 +13,8 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -240,8 +242,20 @@ func (h *handler) setup(w http.ResponseWriter, r *http.Request) {
 
 func (h *handler) clientConfig(w http.ResponseWriter, r *http.Request) {
 	noStore(w)
+	executable, err := os.Executable()
+	if err != nil {
+		jsonError(w, http.StatusInternalServerError, "Não foi possível determinar o caminho do executável em execução.")
+		return
+	}
+	if !filepath.IsAbs(executable) {
+		executable, err = filepath.Abs(executable)
+		if err != nil {
+			jsonError(w, http.StatusInternalServerError, "Não foi possível determinar o caminho absoluto do executável em execução.")
+			return
+		}
+	}
 	// JSON marshaling handles quotes and platform-specific executable paths.
-	config := map[string]any{"mcpServers": map[string]any{"chatwoot": map[string]any{"command": "chatwoot-mcp", "args": []string{"mcp"}}}}
+	config := map[string]any{"mcpServers": map[string]any{"chatwoot": map[string]any{"command": executable, "args": []string{"mcp"}}}}
 	jsonResponse(w, http.StatusOK, map[string]any{"config": config})
 }
 

@@ -6,6 +6,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -251,5 +253,46 @@ func TestReadOnlyEndpointsDoNotSaveConfiguration(t *testing.T) {
 	b, _ := io.ReadAll(w.Body)
 	if strings.Contains(string(b), "saved") {
 		t.Fatal("client config leaked token")
+	}
+}
+
+func TestClientConfigUsesAbsoluteRunningExecutableWithoutToken(t *testing.T) {
+	const token = "saved-secret-token"
+	store := &memoryStore{settings: core.Settings{BaseURL: "https://cw.example", AccountID: 7, Token: token}}
+	h := testHandler(t, store)
+	w := request(t, h, "GET", "/api/client-config", "", "")
+	if w.Code != http.StatusOK {
+		t.Fatalf("client config: status=%d body=%s", w.Code, w.Body.String())
+	}
+	var result struct {
+		Config struct {
+			MCPServers map[string]struct {
+				Command string   `json:"command"`
+				Args    []string `json:"args"`
+			} `json:"mcpServers"`
+		} `json:"config"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	entry, ok := result.Config.MCPServers["chatwoot"]
+	if !ok {
+		t.Fatal("missing chatwoot MCP server config")
+	}
+	expected, err := os.Executable()
+	if err != nil {
+		t.Fatalf("resolve test executable: %v", err)
+	}
+	if !filepath.IsAbs(entry.Command) {
+		t.Fatalf("command path is not absolute: %q", entry.Command)
+	}
+	if entry.Command != expected {
+		t.Fatalf("command=%q, want executable %q", entry.Command, expected)
+	}
+	if len(entry.Args) != 1 || entry.Args[0] != "mcp" {
+		t.Fatalf("args=%v, want [mcp]", entry.Args)
+	}
+	if strings.Contains(w.Body.String(), token) {
+		t.Fatal("client config leaked saved token")
 	}
 }
