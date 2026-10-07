@@ -352,6 +352,61 @@ func TestSendReplyContextDeadlineIsDeliveryUnknown(t *testing.T) {
 	}
 }
 
+func TestSendReplyTransportErrorIsDeliveryUnknown(t *testing.T) {
+	fake := &fakeAPI{
+		getConv: core.Conversation{ID: 42, CanReply: true},
+		createErr: &chatwoot.Error{
+			Kind:     chatwoot.KindTransport,
+			Resource: "conversation 42 message",
+			Message:  "connection reset by peer",
+		},
+	}
+	svc := New(fake)
+
+	_, err := svc.SendReply(context.Background(), 42, "Olá")
+	requireCode(t, err, CodeDeliveryUnknown)
+	if fake.createCalls != 1 {
+		t.Fatalf("create calls = %d, want exactly 1 (no automatic retry)", fake.createCalls)
+	}
+	var apiErr *chatwoot.Error
+	if !errors.As(err, &apiErr) || apiErr.Kind != chatwoot.KindTransport {
+		t.Fatalf("underlying transport error not preserved: %v", err)
+	}
+}
+
+func TestSendReplyPreservesOriginalContentWhitespace(t *testing.T) {
+	const content = "  Olá\n\nAssinatura  "
+	fake := &fakeAPI{
+		getConv:       core.Conversation{ID: 42, CanReply: true},
+		createMessage: core.Message{ID: 500, Content: content, Status: "sent"},
+	}
+	svc := New(fake)
+
+	if _, err := svc.SendReply(context.Background(), 42, content); err != nil {
+		t.Fatalf("SendReply: %v", err)
+	}
+	if fake.createCalls != 1 {
+		t.Fatalf("sent %d times, want 1", fake.createCalls)
+	}
+	if fake.createTexts[0] != content {
+		t.Fatalf("sent content = %q, want original %q", fake.createTexts[0], content)
+	}
+}
+
+func TestSendReplyRejectsConversationIDMismatch(t *testing.T) {
+	fake := &fakeAPI{
+		getConv:       core.Conversation{ID: 99, CanReply: true},
+		createMessage: core.Message{ID: 500, Status: "sent"},
+	}
+	svc := New(fake)
+
+	_, err := svc.SendReply(context.Background(), 42, "Olá")
+	requireCode(t, err, CodeConversationMismatch)
+	if fake.createCalls != 0 {
+		t.Fatalf("sent %d times despite the API returning the wrong conversation", fake.createCalls)
+	}
+}
+
 func TestReadErrorPreservesHTTPClassification(t *testing.T) {
 	fake := &fakeAPI{getErr: &chatwoot.Error{Kind: chatwoot.KindUnauthorized, StatusCode: 401, Message: "Invalid Access Token"}}
 	svc := New(fake)

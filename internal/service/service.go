@@ -31,15 +31,16 @@ const DeliveryAcceptedByAPI = "accepted_by_api"
 type Code string
 
 const (
-	CodeInvalidInput    Code = "invalid_input"
-	CodeCannotReply     Code = "cannot_reply"
-	CodeDeliveryUnknown Code = "delivery_unknown"
-	CodeUnauthorized    Code = "unauthorized"
-	CodeForbidden       Code = "forbidden"
-	CodeNotFound        Code = "not_found"
-	CodeRateLimited     Code = "rate_limited"
-	CodeTimeout         Code = "timeout"
-	CodeUpstream        Code = "upstream_error"
+	CodeInvalidInput         Code = "invalid_input"
+	CodeCannotReply          Code = "cannot_reply"
+	CodeConversationMismatch Code = "conversation_mismatch"
+	CodeDeliveryUnknown      Code = "delivery_unknown"
+	CodeUnauthorized         Code = "unauthorized"
+	CodeForbidden            Code = "forbidden"
+	CodeNotFound             Code = "not_found"
+	CodeRateLimited          Code = "rate_limited"
+	CodeTimeout              Code = "timeout"
+	CodeUpstream             Code = "upstream_error"
 )
 
 // Error is a typed service failure. It wraps the originating Chatwoot error,
@@ -161,22 +162,28 @@ func (s *service) GetContactConversations(ctx context.Context, contactID int64, 
 	return result, nil
 }
 
-// SendReply reads the conversation to check that it accepts a reply, then
-// sends exactly once. The read-before-send check prevents sending to a stale
-// or non-repliable conversation, and the single POST means an ambiguous
-// failure is reported as delivery_unknown instead of retried.
+// SendReply reads the conversation to check that it is the requested one and
+// accepts a reply, then sends exactly once with the caller's original content.
+// The read-before-send check prevents sending to a stale, wrong or
+// non-repliable conversation, and the single POST means an ambiguous failure
+// is reported as delivery_unknown instead of retried.
 func (s *service) SendReply(ctx context.Context, conversationID int64, content string) (SendResult, error) {
 	if conversationID <= 0 {
 		return SendResult{}, invalidInput("conversation id must be a positive integer")
 	}
-	text := strings.TrimSpace(content)
-	if text == "" {
+	if strings.TrimSpace(content) == "" {
 		return SendResult{}, invalidInput("reply content must not be empty")
 	}
 
 	conv, err := s.api.GetConversation(ctx, conversationID)
 	if err != nil {
 		return SendResult{}, fromAPI(err)
+	}
+	if conv.ID != conversationID {
+		return SendResult{}, &Error{
+			Code:    CodeConversationMismatch,
+			Message: fmt.Sprintf("requested conversation %d but the API returned conversation %d", conversationID, conv.ID),
+		}
 	}
 	if !conv.CanReply {
 		return SendResult{}, &Error{
@@ -185,7 +192,7 @@ func (s *service) SendReply(ctx context.Context, conversationID int64, content s
 		}
 	}
 
-	msg, err := s.api.CreateMessage(ctx, conversationID, text)
+	msg, err := s.api.CreateMessage(ctx, conversationID, content)
 	if err != nil {
 		if isDeliveryUnknown(err) {
 			return SendResult{}, &Error{
@@ -263,10 +270,15 @@ func codeForKind(kind chatwoot.Kind) Code {
 }
 
 // isDeliveryUnknown reports whether a failed CreateMessage may still have
-// reached Chatwoot, so the reply must not be retried automatically.
+// reached Chatwoot, so the reply must not be retried automatically. A
+// transport failure can happen after the request left the client, so it is as
+// ambiguous as a timeout.
 func isDeliveryUnknown(err error) bool {
 	if chatwoot.IsTimeout(err) {
 		return true
+	}
+	if apiErr := apiErrorOf(err); apiErr != nil {
+		return apiErr.Kind == chatwoot.KindTransport
 	}
 	return errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled)
 }
