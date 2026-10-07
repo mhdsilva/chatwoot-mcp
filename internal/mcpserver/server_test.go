@@ -442,6 +442,10 @@ func TestListConversationsDefaultsPageToOne(t *testing.T) {
 }
 
 func TestOutputsNeverContainCredentialFields(t *testing.T) {
+	// Sentinel is deliberately absent from the returned data, so it must never
+	// appear. A sentinel that is legitimate message content would be echoed and
+	// is intentionally not asserted here.
+	const sentinel = "super-secret-token-value"
 	fake := &fakeService{
 		identity: core.Identity{AccountID: 7, AccountName: "Acme", UserName: "Ana"},
 		listPage: core.Page[core.Conversation]{Items: []core.Conversation{{ID: 11, Status: "open", CanReply: true}}},
@@ -497,6 +501,9 @@ func TestOutputsNeverContainCredentialFields(t *testing.T) {
 			if hasJSONKey(parsed, key) {
 				t.Fatalf("%s: result carries credential field %q: %s", call.name, key, blob)
 			}
+		}
+		if strings.Contains(string(blob), sentinel) {
+			t.Fatalf("%s: sentinel value leaked into result: %s", call.name, blob)
 		}
 		for _, c := range res.Content {
 			text, ok := c.(*mcp.TextContent)
@@ -685,6 +692,114 @@ func firstMessageContent(t *testing.T, data map[string]any) string {
 	}
 	content, _ := messages[0].(map[string]any)["content"].(string)
 	return content
+}
+
+func TestGetConversationTruncatesStatusFields(t *testing.T) {
+	longStatus := strings.Repeat("界", 400) // 1200 bytes, 3-byte runes
+	fake := &fakeService{getResult: service.ConversationResult{
+		Conversation: core.Conversation{
+			ID:       42,
+			Status:   longStatus,
+			CanReply: true,
+			Messages: []core.Message{{ID: 1, Content: "oi", Status: longStatus}},
+		},
+		TotalMessages:    1,
+		ReturnedMessages: 1,
+		UntrustedContent: true,
+		ContentNotice:    service.UntrustedContentNotice,
+	}}
+	session, ctx := connectSession(t, fake)
+
+	res, err := session.CallTool(ctx, &mcp.CallToolParams{
+		Name:      "get_conversation",
+		Arguments: map[string]any{"conversation_id": 42},
+	})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	if structuredEnvelope(t, res)["text_truncated"] != true {
+		t.Fatalf("text_truncated = false, want true for oversized status fields")
+	}
+	data := structuredData(t, res)
+	conversation, _ := data["conversation"].(map[string]any)
+	convStatus, _ := conversation["status"].(string)
+	if len(convStatus) > MaxTextBytes {
+		t.Fatalf("conversation status = %d bytes, want <= %d", len(convStatus), MaxTextBytes)
+	}
+	if !utf8.ValidString(convStatus) {
+		t.Fatalf("conversation status is not valid UTF-8")
+	}
+	messages, _ := conversation["messages"].([]any)
+	msgStatus, _ := messages[0].(map[string]any)["status"].(string)
+	if len(msgStatus) > MaxTextBytes {
+		t.Fatalf("message status = %d bytes, want <= %d", len(msgStatus), MaxTextBytes)
+	}
+	if !utf8.ValidString(msgStatus) {
+		t.Fatalf("message status is not valid UTF-8")
+	}
+}
+
+func TestSendReplyTruncatesEchoedStatus(t *testing.T) {
+	longStatus := strings.Repeat("é", 400) // 800 bytes, 2-byte runes
+	fake := &fakeService{sendResult: service.SendResult{
+		ConversationID: 42,
+		Message:        core.Message{ID: 500, Content: "Olá", Status: longStatus},
+		Delivery:       service.DeliveryAcceptedByAPI,
+	}}
+	session, ctx := connectSession(t, fake)
+
+	res, err := session.CallTool(ctx, &mcp.CallToolParams{
+		Name:      "send_reply",
+		Arguments: map[string]any{"conversation_id": 42, "content": "Olá"},
+	})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	if structuredEnvelope(t, res)["text_truncated"] != true {
+		t.Fatalf("text_truncated = false, want true for oversized echoed status")
+	}
+	message, _ := structuredData(t, res)["message"].(map[string]any)
+	status, _ := message["status"].(string)
+	if len(status) > MaxTextBytes {
+		t.Fatalf("echoed status = %d bytes, want <= %d", len(status), MaxTextBytes)
+	}
+	if !utf8.ValidString(status) {
+		t.Fatalf("echoed status is not valid UTF-8")
+	}
+	if len(fake.sendTexts) != 1 || fake.sendTexts[0] != "Olá" {
+		t.Fatalf("service received %v, want the original content (POST must be untouched)", fake.sendTexts)
+	}
+}
+
+func TestErrorTextIsBounded(t *testing.T) {
+	huge := strings.Repeat("界", 1000) // 3000 bytes
+	fake := &fakeService{checkErr: &service.Error{Code: service.CodeUpstream, Message: huge}}
+	session, ctx := connectSession(t, fake)
+
+	res, err := session.CallTool(ctx, &mcp.CallToolParams{
+		Name:      "check_connection",
+		Arguments: map[string]any{},
+	})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	if !res.IsError {
+		t.Fatalf("IsError = false, want true")
+	}
+	e := structuredError(t, res)
+	if e["code"] != string(service.CodeUpstream) {
+		t.Fatalf("code = %v, want %q (code must stay exact)", e["code"], service.CodeUpstream)
+	}
+	message, _ := e["message"].(string)
+	if len(message) > MaxErrorBytes {
+		t.Fatalf("error message = %d bytes, want <= %d", len(message), MaxErrorBytes)
+	}
+	if !utf8.ValidString(message) {
+		t.Fatalf("error message is not valid UTF-8")
+	}
+	if structuredEnvelope(t, res)["text_truncated"] != true {
+		t.Fatalf("text_truncated = false, want true for an oversized error message")
+	}
 }
 
 type syncBuffer struct {

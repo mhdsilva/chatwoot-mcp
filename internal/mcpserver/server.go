@@ -29,8 +29,12 @@ const MaxListItems = 50
 const MaxMessageContentBytes = 2048
 
 // MaxTextBytes bounds the UTF-8 bytes of free-text contact and summary fields,
-// such as a contact name, email, phone or conversation status.
+// such as a contact name, email, phone, conversation status or message status.
 const MaxTextBytes = 256
+
+// MaxErrorBytes bounds the UTF-8 bytes of an error message emitted by the MCP
+// adapter, so a long upstream message cannot make error output unpredictable.
+const MaxErrorBytes = 512
 
 const (
 	serverName    = "chatwoot-mcp"
@@ -196,10 +200,9 @@ func newServerWithLogger(svc service.Service, logger *slog.Logger) *mcp.Server {
 		if err != nil {
 			return fail[getConversationOutput](err)
 		}
-		messages, textTruncated := truncateMessages(conv.Conversation.Messages)
-		conv.Conversation.Messages = messages
+		conversation, textTruncated := truncateConversation(conv.Conversation)
 		return ok(getConversationOutput{
-			Conversation:     conv.Conversation,
+			Conversation:     conversation,
 			TotalMessages:    conv.TotalMessages,
 			ReturnedMessages: conv.ReturnedMessages,
 			Truncated:        conv.Truncated,
@@ -270,14 +273,16 @@ func ok[T any](data T, textTruncated bool) (*mcp.CallToolResult, result[T], erro
 }
 
 func fail[T any](err error) (*mcp.CallToolResult, result[T], error) {
-	out := result[T]{Error: errorPayloadFrom(err)}
+	payload, truncated := errorPayloadFrom(err)
+	out := result[T]{Error: payload, TextTruncated: truncated}
 	return &mcp.CallToolResult{IsError: true}, out, nil
 }
 
 // errorPayloadFrom keeps the service code machine-readable and never includes
 // credentials, because neither the service nor the API client carries a token
-// in an error.
-func errorPayloadFrom(err error) *errorPayload {
+// in an error. The readable message is bounded to MaxErrorBytes; the code is
+// always preserved exactly.
+func errorPayloadFrom(err error) (*errorPayload, bool) {
 	var svcErr *service.Error
 	if errors.As(err, &svcErr) {
 		message := svcErr.Message
@@ -287,12 +292,17 @@ func errorPayloadFrom(err error) *errorPayload {
 		if message == "" {
 			message = svcErr.Error()
 		}
-		return &errorPayload{Code: string(svcErr.Code), Message: message}
+		return boundedError(string(svcErr.Code), message)
 	}
 	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
-		return &errorPayload{Code: string(service.CodeTimeout), Message: err.Error()}
+		return boundedError(string(service.CodeTimeout), err.Error())
 	}
-	return &errorPayload{Code: string(service.CodeUpstream), Message: err.Error()}
+	return boundedError(string(service.CodeUpstream), err.Error())
+}
+
+func boundedError(code, message string) (*errorPayload, bool) {
+	message, truncated := truncateUTF8(message, MaxErrorBytes)
+	return &errorPayload{Code: code, Message: message}, truncated
 }
 
 func normalizePage(page int) int {
@@ -339,15 +349,27 @@ func contactSummaries(items []core.Contact) ([]contactSummary, bool) {
 	return out, truncated
 }
 
-// truncateMessage bounds one message content without mutating the caller's
-// value. It returns a copy so the service-owned data stays intact.
+// truncateMessage bounds one message content and status without mutating the
+// caller's value. It returns a copy so the service-owned data stays intact.
 func truncateMessage(m core.Message) (core.Message, bool) {
-	content, truncated := truncateUTF8(m.Content, MaxMessageContentBytes)
-	if !truncated {
+	content, cutContent := truncateUTF8(m.Content, MaxMessageContentBytes)
+	status, cutStatus := truncateUTF8(m.Status, MaxTextBytes)
+	if !cutContent && !cutStatus {
 		return m, false
 	}
 	m.Content = content
+	m.Status = status
 	return m, true
+}
+
+// truncateConversation bounds the conversation status and every message without
+// mutating the service-owned conversation.
+func truncateConversation(c core.Conversation) (core.Conversation, bool) {
+	status, cutStatus := truncateUTF8(c.Status, MaxTextBytes)
+	messages, cutMessages := truncateMessages(c.Messages)
+	c.Status = status
+	c.Messages = messages
+	return c, cutStatus || cutMessages
 }
 
 func truncateMessages(messages []core.Message) ([]core.Message, bool) {
