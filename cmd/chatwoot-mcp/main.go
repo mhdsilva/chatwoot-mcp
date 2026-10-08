@@ -28,6 +28,9 @@ import (
 
 const panelPort = 8765
 
+// version is injected at build time with -ldflags "-X main.version=...".
+var version = "dev"
+
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -188,11 +191,14 @@ func runAppWith(ctx context.Context, stderr io.Writer, browser browserOpener, se
 
 func runWith(ctx context.Context, args []string, stderr io.Writer, stdin io.Reader, stdout io.Writer, browser browserOpener, servePanel panelRunner, serveMCP mcpRunner) error {
 	if len(args) != 1 {
-		fmt.Fprintln(stderr, "usage: chatwoot-mcp <app|panel|mcp|configure-client>")
+		fmt.Fprintln(stderr, "usage: chatwoot-mcp <app|panel|mcp|configure-client|version>")
 		return errors.New("expected one command")
 	}
 
 	switch args[0] {
+	case "version", "--version", "-version":
+		fmt.Fprintf(stdout, "chatwoot-mcp %s\n", version)
+		return nil
 	case "panel":
 		const address = "http://127.0.0.1:8765/"
 		fmt.Fprintf(stdout, "Chatwoot MCP panel: %s\n", address)
@@ -215,7 +221,7 @@ func runWith(ctx context.Context, args []string, stderr io.Writer, stdin io.Read
 		api := chatwoot.NewClient(settings, nil)
 		return serveMCP(ctx, service.New(api), stdin, stdout)
 	default:
-		fmt.Fprintln(stderr, "usage: chatwoot-mcp <app|panel|mcp|configure-client>")
+		fmt.Fprintln(stderr, "usage: chatwoot-mcp <app|panel|mcp|configure-client|version>")
 		return fmt.Errorf("unknown command: %s", args[0])
 	}
 }

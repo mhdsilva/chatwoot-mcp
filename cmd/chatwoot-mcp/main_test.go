@@ -270,7 +270,7 @@ func TestRunWithUsageErrors(t *testing.T) {
 			if err == nil {
 				t.Fatal("expected usage error")
 			}
-			if !strings.Contains(stderr.String(), "usage: chatwoot-mcp <app|panel|mcp|configure-client>") {
+			if !strings.Contains(stderr.String(), "usage: chatwoot-mcp <app|panel|mcp|configure-client|version>") {
 				t.Fatalf("usage missing from stderr: %q", stderr.String())
 			}
 			if stdout.Len() != 0 {
