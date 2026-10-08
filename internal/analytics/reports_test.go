@@ -108,7 +108,8 @@ func TestConversationMetricsAggregateAllAndReturnNewest50(t *testing.T) {
 		if i == 3 || i == 4 {
 			name = "resolution"
 		}
-		fake.events = append(fake.events, core.ReportingEvent{ID: int64(i + 1), Name: name, ValueSeconds: &value, BusinessValueSeconds: &value, EventStartTime: time.Unix(int64(i), 0).UTC()})
+		at := time.Unix(int64(i), 0).UTC()
+		fake.events = append(fake.events, core.ReportingEvent{ID: int64(i + 1), Name: name, ValueSeconds: &value, BusinessValueSeconds: &value, EventStartTime: at, EventEndTime: at})
 	}
 	service := New(nil, fake, nil)
 	got, err := service.GetConversationMetrics(context.Background(), 123)
