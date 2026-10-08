@@ -29,6 +29,8 @@ var wantToolNames = []string{
 	"add_private_note",
 	"assign_conversation",
 	"check_connection",
+	"create_conversation",
+	"get_contact",
 	"get_contact_conversations",
 	"get_conversation",
 	"get_conversation_labels",
@@ -44,6 +46,7 @@ var wantToolNames = []string{
 	"send_template",
 	"set_conversation_status",
 	"set_priority",
+	"update_contact",
 }
 
 var wantRequired = map[string][]string{
@@ -51,6 +54,10 @@ var wantRequired = map[string][]string{
 	"add_private_note":           {"conversation_id", "content"},
 	"assign_conversation":        {"conversation_id"},
 	"check_connection":           nil,
+	"create_conversation":        {"inbox_id", "contact_id"},
+	"get_contact":                {"contact_id"},
+	"get_contact_conversations":  {"contact_id"},
+	"get_conversation":           {"conversation_id"},
 	"get_conversation_labels":    {"conversation_id"},
 	"list_agents":                nil,
 	"list_conversations":         nil,
@@ -58,14 +65,13 @@ var wantRequired = map[string][]string{
 	"list_message_templates":     {"inbox_id"},
 	"list_teams":                 nil,
 	"remove_conversation_labels": {"conversation_id", "labels"},
-	"get_conversation":           {"conversation_id"},
 	"search_contacts":            {"query"},
-	"get_contact_conversations":  {"contact_id"},
 	"send_attachment":            {"conversation_id", "path"},
 	"send_reply":                 {"conversation_id", "content"},
 	"send_template":              {"conversation_id", "template_name", "language", "category"},
 	"set_conversation_status":    {"conversation_id", "status"},
 	"set_priority":               {"conversation_id", "priority"},
+	"update_contact":             {"contact_id"},
 }
 
 type fakeService struct {
@@ -160,6 +166,26 @@ type fakeService struct {
 	templateCalls  int
 	templateConv   int64
 	templateInput  service.TemplateInput
+
+	contactDetail      core.ContactDetail
+	contactDetailErr   error
+	contactDetailCalls int
+	contactDetailID    int64
+
+	updateContact    core.ContactDetail
+	updateContactErr error
+	updateCalls      int
+	updateID         int64
+	updateName       *string
+	updateEmail      *string
+	updatePhone      *string
+
+	createConvResult  service.CreateConversationResult
+	createConvErr     error
+	createConvCalls   int
+	createConvInbox   int64
+	createConvContact int64
+	createConvSource  string
 }
 
 func (f *fakeService) CheckConnection(context.Context) (core.Identity, error) {
@@ -284,6 +310,29 @@ func (f *fakeService) SendTemplate(_ context.Context, conversationID int64, in s
 	f.templateConv = conversationID
 	f.templateInput = in
 	return f.templateResult, f.templateErr
+}
+
+func (f *fakeService) GetContact(_ context.Context, contactID int64) (core.ContactDetail, error) {
+	f.contactDetailCalls++
+	f.contactDetailID = contactID
+	return f.contactDetail, f.contactDetailErr
+}
+
+func (f *fakeService) UpdateContact(_ context.Context, contactID int64, name, email, phone *string) (core.ContactDetail, error) {
+	f.updateCalls++
+	f.updateID = contactID
+	f.updateName = name
+	f.updateEmail = email
+	f.updatePhone = phone
+	return f.updateContact, f.updateContactErr
+}
+
+func (f *fakeService) CreateConversation(_ context.Context, inboxID, contactID int64, sourceID string) (service.CreateConversationResult, error) {
+	f.createConvCalls++
+	f.createConvInbox = inboxID
+	f.createConvContact = contactID
+	f.createConvSource = sourceID
+	return f.createConvResult, f.createConvErr
 }
 
 // fakeAPI is a minimal core.API used to exercise the real service bounding and
@@ -759,6 +808,91 @@ func TestSendAttachmentChannelUnsupportedErrorCode(t *testing.T) {
 	res, err := session.CallTool(ctx, &mcp.CallToolParams{
 		Name:      "send_attachment",
 		Arguments: map[string]any{"conversation_id": 42, "path": "/tmp/pic.png"},
+	})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	if !res.IsError {
+		t.Fatal("expected an error result")
+	}
+	if e := structuredError(t, res); e["code"] != string(service.CodeChannelUnsupported) {
+		t.Fatalf("error = %#v", e)
+	}
+}
+
+func TestGetContactToolReturnsDetails(t *testing.T) {
+	fake := &fakeService{contactDetail: core.ContactDetail{ID: 99, Name: "Ana", Email: "ana@example.com", Blocked: false}}
+	session, ctx := connectSession(t, fake)
+
+	res, err := session.CallTool(ctx, &mcp.CallToolParams{Name: "get_contact", Arguments: map[string]any{"contact_id": 99}})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("unexpected tool error: %s", resultText(res))
+	}
+	if fake.contactDetailID != 99 {
+		t.Fatalf("contact id = %d", fake.contactDetailID)
+	}
+	if data := structuredData(t, res); data["name"] != "Ana" {
+		t.Fatalf("data = %#v", data)
+	}
+}
+
+func TestUpdateContactToolPassesOnlyProvidedFields(t *testing.T) {
+	fake := &fakeService{updateContact: core.ContactDetail{ID: 99, Name: "Ana Maria"}}
+	session, ctx := connectSession(t, fake)
+
+	res, err := session.CallTool(ctx, &mcp.CallToolParams{
+		Name:      "update_contact",
+		Arguments: map[string]any{"contact_id": 99, "name": "Ana Maria"},
+	})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("unexpected tool error: %s", resultText(res))
+	}
+	if fake.updateName == nil || *fake.updateName != "Ana Maria" || fake.updateEmail != nil || fake.updatePhone != nil {
+		t.Fatalf("service call = name %v email %v phone %v", fake.updateName, fake.updateEmail, fake.updatePhone)
+	}
+}
+
+func TestCreateConversationToolPassesIds(t *testing.T) {
+	fake := &fakeService{createConvResult: service.CreateConversationResult{
+		ConversationID: 77,
+		InboxID:        1,
+		ChannelType:    "Channel::WebWidget",
+		Status:         "open",
+	}}
+	session, ctx := connectSession(t, fake)
+
+	res, err := session.CallTool(ctx, &mcp.CallToolParams{
+		Name:      "create_conversation",
+		Arguments: map[string]any{"inbox_id": 1, "contact_id": 99},
+	})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("unexpected tool error: %s", resultText(res))
+	}
+	if fake.createConvInbox != 1 || fake.createConvContact != 99 {
+		t.Fatalf("service call = (%d, %d)", fake.createConvInbox, fake.createConvContact)
+	}
+	data := structuredData(t, res)
+	if data["conversation_id"] != float64(77) || data["channel_type"] != "Channel::WebWidget" {
+		t.Fatalf("data = %#v", data)
+	}
+}
+
+func TestCreateConversationChannelUnsupportedErrorCode(t *testing.T) {
+	fake := &fakeService{createConvErr: &service.Error{Code: service.CodeChannelUnsupported, Message: "details"}}
+	session, ctx := connectSession(t, fake)
+
+	res, err := session.CallTool(ctx, &mcp.CallToolParams{
+		Name:      "create_conversation",
+		Arguments: map[string]any{"inbox_id": 1, "contact_id": 99},
 	})
 	if err != nil {
 		t.Fatalf("CallTool: %v", err)

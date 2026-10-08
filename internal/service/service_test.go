@@ -82,6 +82,19 @@ type fakeAPI struct {
 	templatesErr   error
 	templatesCalls int
 	templatesInbox int64
+
+	contactDetail      core.ContactDetail
+	contactDetailErr   error
+	contactDetailCalls int
+	contactDetailIDs   []int64
+
+	updateContact    core.ContactDetail
+	updateContactErr error
+	updateReqs       []core.ContactUpdate
+
+	createConv     core.Conversation
+	createConvErr  error
+	createConvReqs []core.ConversationCreateRequest
 }
 
 var errAPINotUsed = errors.New("unexpected API call in service test")
@@ -173,16 +186,20 @@ func (f *fakeAPI) ListTeams(context.Context) ([]core.Team, error) {
 	return f.teams, f.teamsErr
 }
 
-func (f *fakeAPI) GetContact(context.Context, int64) (core.ContactDetail, error) {
-	return core.ContactDetail{}, errAPINotUsed
+func (f *fakeAPI) GetContact(_ context.Context, id int64) (core.ContactDetail, error) {
+	f.contactDetailCalls++
+	f.contactDetailIDs = append(f.contactDetailIDs, id)
+	return f.contactDetail, f.contactDetailErr
 }
 
-func (f *fakeAPI) UpdateContact(context.Context, core.ContactUpdate) (core.ContactDetail, error) {
-	return core.ContactDetail{}, errAPINotUsed
+func (f *fakeAPI) UpdateContact(_ context.Context, req core.ContactUpdate) (core.ContactDetail, error) {
+	f.updateReqs = append(f.updateReqs, req)
+	return f.updateContact, f.updateContactErr
 }
 
-func (f *fakeAPI) CreateConversation(context.Context, core.ConversationCreateRequest) (core.Conversation, error) {
-	return core.Conversation{}, errAPINotUsed
+func (f *fakeAPI) CreateConversation(_ context.Context, req core.ConversationCreateRequest) (core.Conversation, error) {
+	f.createConvReqs = append(f.createConvReqs, req)
+	return f.createConv, f.createConvErr
 }
 
 var _ core.API = (*fakeAPI)(nil)

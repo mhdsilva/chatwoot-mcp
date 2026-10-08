@@ -138,3 +138,18 @@ func channelLabel(channelType string) string {
 	}
 	return label
 }
+
+// conversationInitiationAllowed reports whether a new outbound conversation can
+// be started on the channel. Chatwoot allows initiation only on Website, API,
+// Email and SMS/Phone channels; messaging channels require the contact to
+// write first.
+func conversationInitiationAllowed(channelType, medium string) bool {
+	switch channelType {
+	case channelWebWidget, channelAPI, channelEmail, channelSms:
+		return true
+	case channelTwilioSms:
+		return medium != "whatsapp"
+	default:
+		return false
+	}
+}

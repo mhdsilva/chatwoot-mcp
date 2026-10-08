@@ -123,6 +123,10 @@ type Service interface {
 	SendAttachment(context.Context, int64, string, string) (AttachmentResult, error)
 	ListMessageTemplates(context.Context, int64) ([]core.Template, error)
 	SendTemplate(context.Context, int64, TemplateInput) (SendResult, error)
+
+	GetContact(context.Context, int64) (core.ContactDetail, error)
+	UpdateContact(context.Context, int64, *string, *string, *string) (core.ContactDetail, error)
+	CreateConversation(context.Context, int64, int64, string) (CreateConversationResult, error)
 }
 
 // New builds a service backed by the given API client.

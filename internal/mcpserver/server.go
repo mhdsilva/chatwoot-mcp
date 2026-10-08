@@ -281,6 +281,7 @@ func newServerWithLogger(svc service.Service, logger *slog.Logger) *mcp.Server {
 	registerConversationTools(server, svc)
 	registerOrganizationTools(server, svc)
 	registerRichMessageTools(server, svc)
+	registerContactTools(server, svc)
 
 	return server
 }
