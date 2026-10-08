@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"sort"
@@ -140,9 +141,57 @@ func (f *fakeAPI) ContactConversations(context.Context, int64, int) (core.Page[c
 	return core.Page[core.Conversation]{}, nil
 }
 
-func (f *fakeAPI) CreateMessage(context.Context, int64, string) (core.Message, error) {
+func (f *fakeAPI) CreateMessage(context.Context, core.MessageRequest) (core.Message, error) {
 	return core.Message{}, nil
 }
+
+func (f *fakeAPI) SetStatus(context.Context, core.StatusRequest) (core.Conversation, error) {
+	return core.Conversation{}, errAPINotUsed
+}
+
+func (f *fakeAPI) SetPriority(context.Context, core.PriorityRequest) (core.Conversation, error) {
+	return core.Conversation{}, errAPINotUsed
+}
+
+func (f *fakeAPI) Assign(context.Context, core.AssignmentRequest) (core.Conversation, error) {
+	return core.Conversation{}, errAPINotUsed
+}
+
+func (f *fakeAPI) GetLabels(context.Context, int64) ([]string, error) { return nil, errAPINotUsed }
+
+func (f *fakeAPI) SetLabels(context.Context, core.LabelsRequest) ([]string, error) {
+	return nil, errAPINotUsed
+}
+
+func (f *fakeAPI) ListInboxes(context.Context) ([]core.Inbox, error) { return nil, errAPINotUsed }
+
+func (f *fakeAPI) GetInbox(context.Context, int64) (core.Inbox, error) {
+	return core.Inbox{}, errAPINotUsed
+}
+
+func (f *fakeAPI) ListAgents(context.Context) ([]core.Agent, error) { return nil, errAPINotUsed }
+
+func (f *fakeAPI) ListTeams(context.Context) ([]core.Team, error) { return nil, errAPINotUsed }
+
+func (f *fakeAPI) GetContact(context.Context, int64) (core.ContactDetail, error) {
+	return core.ContactDetail{}, errAPINotUsed
+}
+
+func (f *fakeAPI) UpdateContact(context.Context, core.ContactUpdate) (core.ContactDetail, error) {
+	return core.ContactDetail{}, errAPINotUsed
+}
+
+func (f *fakeAPI) CreateConversation(context.Context, core.ConversationCreateRequest) (core.Conversation, error) {
+	return core.Conversation{}, errAPINotUsed
+}
+
+func (f *fakeAPI) ListTemplates(context.Context, int64) ([]core.Template, error) {
+	return nil, errAPINotUsed
+}
+
+var errAPINotUsed = errors.New("unexpected API call in mcpserver test")
+
+var _ core.API = (*fakeAPI)(nil)
 
 func connectSession(t *testing.T, svc service.Service) (*mcp.ClientSession, context.Context) {
 	t.Helper()

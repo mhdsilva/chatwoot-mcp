@@ -195,7 +195,7 @@ func (s *service) SendReply(ctx context.Context, conversationID int64, content s
 		}
 	}
 
-	msg, err := s.api.CreateMessage(ctx, conversationID, content)
+	msg, err := s.api.CreateMessage(ctx, core.MessageRequest{ConversationID: conversationID, Content: content})
 	if err != nil {
 		if isDeliveryUnknown(err) {
 			return SendResult{}, &Error{

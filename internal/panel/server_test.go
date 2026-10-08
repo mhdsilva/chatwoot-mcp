@@ -3,6 +3,7 @@ package panel_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -47,9 +48,58 @@ func (fakeAPI) SearchContacts(context.Context, string, int) (core.Page[core.Cont
 func (fakeAPI) ContactConversations(context.Context, int64, int) (core.Page[core.Conversation], error) {
 	return core.Page[core.Conversation]{}, nil
 }
-func (fakeAPI) CreateMessage(context.Context, int64, string) (core.Message, error) {
+func (fakeAPI) CreateMessage(context.Context, core.MessageRequest) (core.Message, error) {
 	return core.Message{}, nil
 }
+
+func (fakeAPI) SetStatus(context.Context, core.StatusRequest) (core.Conversation, error) {
+	return core.Conversation{}, errAPINotUsed
+}
+
+func (fakeAPI) SetPriority(context.Context, core.PriorityRequest) (core.Conversation, error) {
+	return core.Conversation{}, errAPINotUsed
+}
+
+func (fakeAPI) Assign(context.Context, core.AssignmentRequest) (core.Conversation, error) {
+	return core.Conversation{}, errAPINotUsed
+}
+
+func (fakeAPI) GetLabels(context.Context, int64) ([]string, error) { return nil, errAPINotUsed }
+
+func (fakeAPI) SetLabels(context.Context, core.LabelsRequest) ([]string, error) {
+	return nil, errAPINotUsed
+}
+
+func (fakeAPI) ListInboxes(context.Context) ([]core.Inbox, error) { return nil, errAPINotUsed }
+
+func (fakeAPI) GetInbox(context.Context, int64) (core.Inbox, error) {
+	return core.Inbox{}, errAPINotUsed
+}
+
+func (fakeAPI) ListAgents(context.Context) ([]core.Agent, error) { return nil, errAPINotUsed }
+
+func (fakeAPI) ListTeams(context.Context) ([]core.Team, error) { return nil, errAPINotUsed }
+
+func (fakeAPI) GetContact(context.Context, int64) (core.ContactDetail, error) {
+	return core.ContactDetail{}, errAPINotUsed
+}
+
+func (fakeAPI) UpdateContact(context.Context, core.ContactUpdate) (core.ContactDetail, error) {
+	return core.ContactDetail{}, errAPINotUsed
+}
+
+func (fakeAPI) CreateConversation(context.Context, core.ConversationCreateRequest) (core.Conversation, error) {
+	return core.Conversation{}, errAPINotUsed
+}
+
+func (fakeAPI) ListTemplates(context.Context, int64) ([]core.Template, error) {
+	return nil, errAPINotUsed
+}
+
+var (
+	errAPINotUsed          = errors.New("unexpected API call in panel test")
+	_             core.API = fakeAPI{}
+)
 
 func testHandler(t *testing.T, store *memoryStore) http.Handler {
 	t.Helper()

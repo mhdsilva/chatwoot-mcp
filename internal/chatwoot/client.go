@@ -13,10 +13,13 @@ import (
 	"fmt"
 	"io"
 	"mime"
+	"mime/multipart"
 	"net"
 	"net/http"
+	"net/textproto"
 	"net/url"
 	"reflect"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -194,7 +197,14 @@ func (c *Client) call(ctx context.Context, method, path string, query url.Values
 	if reqBody != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
+	return c.do(req, resBody, resource)
+}
 
+// do performs one request and decodes the response. It never retries and never
+// follows a redirect, so a message POST that may have reached Chatwoot is not
+// duplicated and the token is never replayed against another host.
+func (c *Client) do(req *http.Request, resBody any, resource string) error {
+	ctx := req.Context()
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
 		return transportError(ctx, err, resource)
@@ -451,16 +461,26 @@ func (a attachmentWire) toCore() core.MessageAttachment {
 }
 
 type conversationWire struct {
-	ID        int64         `json:"id"`
-	InboxID   int64         `json:"inbox_id"`
-	ContactID int64         `json:"contact_id"`
-	Status    string        `json:"status"`
-	CanReply  bool          `json:"can_reply"`
-	Messages  []messageWire `json:"messages"`
-	Meta      struct {
+	ID           int64         `json:"id"`
+	InboxID      int64         `json:"inbox_id"`
+	ContactID    int64         `json:"contact_id"`
+	Status       string        `json:"status"`
+	Priority     string        `json:"priority"`
+	Labels       []string      `json:"labels"`
+	SnoozedUntil string        `json:"snoozed_until"`
+	CanReply     bool          `json:"can_reply"`
+	Messages     []messageWire `json:"messages"`
+	Meta         struct {
 		Sender struct {
 			ID int64 `json:"id"`
 		} `json:"sender"`
+		Channel  string `json:"channel"`
+		Assignee struct {
+			ID int64 `json:"id"`
+		} `json:"assignee"`
+		Team struct {
+			ID int64 `json:"id"`
+		} `json:"team"`
 	} `json:"meta"`
 }
 
@@ -478,12 +498,18 @@ func (c conversationWire) toCore() core.Conversation {
 		messages = append(messages, m.toCore())
 	}
 	return core.Conversation{
-		ID:        c.ID,
-		InboxID:   c.InboxID,
-		ContactID: contactID,
-		Status:    c.Status,
-		CanReply:  c.CanReply,
-		Messages:  messages,
+		ID:           c.ID,
+		InboxID:      c.InboxID,
+		ContactID:    contactID,
+		ChannelType:  c.Meta.Channel,
+		Status:       c.Status,
+		Priority:     c.Priority,
+		Labels:       c.Labels,
+		AssigneeID:   c.Meta.Assignee.ID,
+		TeamID:       c.Meta.Team.ID,
+		SnoozedUntil: c.SnoozedUntil,
+		CanReply:     c.CanReply,
+		Messages:     messages,
 	}
 }
 
@@ -747,16 +773,103 @@ func nextPage(page int, meta *pageMeta, pageSize int) int {
 	return 0
 }
 
-// CreateMessage sends an outgoing text message. It performs a single POST and
-// never retries, so an ambiguous failure cannot produce a duplicate reply.
-func (c *Client) CreateMessage(ctx context.Context, conversationID int64, content string) (core.Message, error) {
-	path := c.accountPath() + "/conversations/" + strconv.FormatInt(conversationID, 10) + "/messages"
-	resource := "conversation " + strconv.FormatInt(conversationID, 10) + " message"
-	payload := map[string]string{"content": content, "message_type": "outgoing"}
+// CreateMessage sends one outgoing message. A plain request is a customer
+// reply, Private makes it an internal note, Attachment uploads one local file
+// as multipart form data, and Template sends a preapproved channel template.
+// It performs a single POST and never retries, so an ambiguous failure cannot
+// produce a duplicate message.
+func (c *Client) CreateMessage(ctx context.Context, req core.MessageRequest) (core.Message, error) {
+	path := c.accountPath() + "/conversations/" + strconv.FormatInt(req.ConversationID, 10) + "/messages"
+	resource := "conversation " + strconv.FormatInt(req.ConversationID, 10) + " message"
+
+	if req.Attachment != nil {
+		return c.createAttachmentMessage(ctx, path, resource, req)
+	}
+
+	payload := map[string]any{"content": req.Content, "message_type": "outgoing"}
+	if req.Private {
+		payload["private"] = true
+	}
+	if req.Template != nil {
+		payload["template_params"] = templateParams(req.Template)
+	}
 
 	var msg messageWire
 	if err := c.call(ctx, http.MethodPost, path, nil, payload, &msg, resource); err != nil {
 		return core.Message{}, err
 	}
 	return msg.toCore(), nil
+}
+
+func templateParams(t *core.TemplateRequest) map[string]any {
+	params := map[string]any{
+		"name":             t.Name,
+		"category":         t.Category,
+		"language":         t.Language,
+		"processed_params": t.ProcessedParams,
+	}
+	if t.ContentMode != "" {
+		params["content_mode"] = t.ContentMode
+	}
+	return params
+}
+
+func (c *Client) createAttachmentMessage(ctx context.Context, path, resource string, req core.MessageRequest) (core.Message, error) {
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+
+	fields := map[string]string{"message_type": "outgoing", "content": req.Content}
+	if req.Private {
+		fields["private"] = "true"
+	}
+	for _, key := range sortedKeys(fields) {
+		if err := writer.WriteField(key, fields[key]); err != nil {
+			return core.Message{}, &Error{Kind: KindRequest, Resource: resource, Message: "encode attachment form: " + err.Error()}
+		}
+	}
+	if err := writeFilePart(writer, "attachments[]", req.Attachment); err != nil {
+		return core.Message{}, &Error{Kind: KindRequest, Resource: resource, Message: "encode attachment form: " + err.Error()}
+	}
+	if err := writer.Close(); err != nil {
+		return core.Message{}, &Error{Kind: KindRequest, Resource: resource, Message: "encode attachment form: " + err.Error()}
+	}
+
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, c.url(path, nil), bytes.NewReader(body.Bytes()))
+	if err != nil {
+		return core.Message{}, &Error{Kind: KindRequest, Resource: resource, Message: err.Error()}
+	}
+	request.Header.Set("api_access_token", c.token)
+	request.Header.Set("Accept", "application/json")
+	request.Header.Set("Content-Type", writer.FormDataContentType())
+
+	var msg messageWire
+	if err := c.do(request, &msg, resource); err != nil {
+		return core.Message{}, err
+	}
+	return msg.toCore(), nil
+}
+
+func writeFilePart(writer *multipart.Writer, field string, attachment *core.Attachment) error {
+	header := textproto.MIMEHeader{}
+	header.Set("Content-Disposition", fmt.Sprintf("form-data; name=%q; filename=%q", field, attachment.Filename))
+	contentType := attachment.ContentType
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
+	header.Set("Content-Type", contentType)
+	part, err := writer.CreatePart(header)
+	if err != nil {
+		return err
+	}
+	_, err = part.Write(attachment.Data)
+	return err
+}
+
+func sortedKeys(values map[string]string) []string {
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
 }

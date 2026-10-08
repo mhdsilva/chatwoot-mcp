@@ -64,7 +64,13 @@ type Conversation struct {
 	ID                int64     `json:"id"`
 	InboxID           int64     `json:"inbox_id"`
 	ContactID         int64     `json:"contact_id"`
+	ChannelType       string    `json:"channel_type,omitempty"`
 	Status            string    `json:"status"`
+	Priority          string    `json:"priority,omitempty"`
+	Labels            []string  `json:"labels,omitempty"`
+	AssigneeID        int64     `json:"assignee_id,omitempty"`
+	TeamID            int64     `json:"team_id,omitempty"`
+	SnoozedUntil      string    `json:"snoozed_until,omitempty"`
 	CanReply          bool      `json:"can_reply"`
 	Messages          []Message `json:"messages"`
 	MessageCount      int       `json:"-"`

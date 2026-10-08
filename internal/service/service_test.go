@@ -43,7 +43,10 @@ type fakeAPI struct {
 	createCalls   int
 	createIDs     []int64
 	createTexts   []string
+	createReqs    []core.MessageRequest
 }
+
+var errAPINotUsed = errors.New("unexpected API call in service test")
 
 func (f *fakeAPI) Check(context.Context) (core.Identity, error) {
 	f.checkCalls++
@@ -76,12 +79,67 @@ func (f *fakeAPI) ContactConversations(_ context.Context, contactID int64, page 
 	return f.contactPage, f.contactErr
 }
 
-func (f *fakeAPI) CreateMessage(_ context.Context, id int64, content string) (core.Message, error) {
+func (f *fakeAPI) CreateMessage(_ context.Context, req core.MessageRequest) (core.Message, error) {
 	f.createCalls++
-	f.createIDs = append(f.createIDs, id)
-	f.createTexts = append(f.createTexts, content)
+	f.createIDs = append(f.createIDs, req.ConversationID)
+	f.createTexts = append(f.createTexts, req.Content)
+	f.createReqs = append(f.createReqs, req)
 	return f.createMessage, f.createErr
 }
+
+func (f *fakeAPI) SetStatus(context.Context, core.StatusRequest) (core.Conversation, error) {
+	return core.Conversation{}, errAPINotUsed
+}
+
+func (f *fakeAPI) SetPriority(context.Context, core.PriorityRequest) (core.Conversation, error) {
+	return core.Conversation{}, errAPINotUsed
+}
+
+func (f *fakeAPI) Assign(context.Context, core.AssignmentRequest) (core.Conversation, error) {
+	return core.Conversation{}, errAPINotUsed
+}
+
+func (f *fakeAPI) GetLabels(context.Context, int64) ([]string, error) {
+	return nil, errAPINotUsed
+}
+
+func (f *fakeAPI) SetLabels(context.Context, core.LabelsRequest) ([]string, error) {
+	return nil, errAPINotUsed
+}
+
+func (f *fakeAPI) ListInboxes(context.Context) ([]core.Inbox, error) {
+	return nil, errAPINotUsed
+}
+
+func (f *fakeAPI) GetInbox(context.Context, int64) (core.Inbox, error) {
+	return core.Inbox{}, errAPINotUsed
+}
+
+func (f *fakeAPI) ListAgents(context.Context) ([]core.Agent, error) {
+	return nil, errAPINotUsed
+}
+
+func (f *fakeAPI) ListTeams(context.Context) ([]core.Team, error) {
+	return nil, errAPINotUsed
+}
+
+func (f *fakeAPI) GetContact(context.Context, int64) (core.ContactDetail, error) {
+	return core.ContactDetail{}, errAPINotUsed
+}
+
+func (f *fakeAPI) UpdateContact(context.Context, core.ContactUpdate) (core.ContactDetail, error) {
+	return core.ContactDetail{}, errAPINotUsed
+}
+
+func (f *fakeAPI) CreateConversation(context.Context, core.ConversationCreateRequest) (core.Conversation, error) {
+	return core.Conversation{}, errAPINotUsed
+}
+
+func (f *fakeAPI) ListTemplates(context.Context, int64) ([]core.Template, error) {
+	return nil, errAPINotUsed
+}
+
+var _ core.API = (*fakeAPI)(nil)
 
 func requireCode(t *testing.T, err error, code Code) *Error {
 	t.Helper()

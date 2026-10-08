@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -434,7 +436,7 @@ func TestCreateMessage(t *testing.T) {
 		_, _ = w.Write([]byte(`{"id":500,"content":"Olá","private":false,"status":"sent","created_at":1700000001}`))
 	})
 
-	msg, err := c.CreateMessage(context.Background(), 42, "Olá")
+	msg, err := c.CreateMessage(context.Background(), core.MessageRequest{ConversationID: 42, Content: "Olá"})
 	if err != nil {
 		t.Fatalf("CreateMessage: %v", err)
 	}
@@ -455,7 +457,7 @@ func TestCreateMessageNeverRetries(t *testing.T) {
 				w.WriteHeader(status)
 				_, _ = w.Write([]byte(`{"error":"temporarily unavailable"}`))
 			})
-			_, err := c.CreateMessage(context.Background(), 42, "Olá")
+			_, err := c.CreateMessage(context.Background(), core.MessageRequest{ConversationID: 42, Content: "Olá"})
 			if err == nil {
 				t.Fatal("expected error")
 			}
@@ -463,6 +465,108 @@ func TestCreateMessageNeverRetries(t *testing.T) {
 				t.Fatalf("create calls = %d, want exactly 1 (no auto retry)", calls)
 			}
 		})
+	}
+}
+
+func TestCreatePrivateNoteIsOutgoingAndPrivate(t *testing.T) {
+	var body map[string]any
+	c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode body: %v", err)
+		}
+		_, _ = w.Write([]byte(`{"id":7,"private":true,"message_type":1,"status":"sent"}`))
+	})
+
+	if _, err := c.CreateMessage(context.Background(), core.MessageRequest{ConversationID: 42, Content: "nota", Private: true}); err != nil {
+		t.Fatalf("CreateMessage: %v", err)
+	}
+	if body["private"] != true || body["message_type"] != "outgoing" {
+		t.Fatalf("note could become public: body = %#v", body)
+	}
+}
+
+func TestCreateMessageTemplateSendsTemplateParams(t *testing.T) {
+	var body map[string]any
+	c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode body: %v", err)
+		}
+		_, _ = w.Write([]byte(`{"id":8,"status":"sent","message_type":3}`))
+	})
+
+	template := &core.TemplateRequest{
+		Name:            "welcome",
+		Category:        "UTILITY",
+		Language:        "en_US",
+		ContentMode:     "raw_template",
+		ProcessedParams: map[string]any{"body": map[string]any{"1": "Ana"}},
+	}
+	if _, err := c.CreateMessage(context.Background(), core.MessageRequest{ConversationID: 42, Content: "hi", Template: template}); err != nil {
+		t.Fatalf("CreateMessage: %v", err)
+	}
+	params, ok := body["template_params"].(map[string]any)
+	if !ok {
+		t.Fatalf("template_params = %#v, want object", body["template_params"])
+	}
+	if params["name"] != "welcome" || params["category"] != "UTILITY" || params["language"] != "en_US" || params["content_mode"] != "raw_template" {
+		t.Fatalf("template_params = %#v", params)
+	}
+	if _, ok := params["processed_params"].(map[string]any); !ok {
+		t.Fatalf("processed_params = %#v, want object", params["processed_params"])
+	}
+}
+
+func TestCreateAttachmentMessageUsesMultipartAttachmentsField(t *testing.T) {
+	var content string
+	var filename string
+	var uploaded []byte
+	var messageType string
+	calls := 0
+	c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if r.Method != http.MethodPost {
+			t.Errorf("method = %q", r.Method)
+		}
+		mediaType, params, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
+		if err != nil || mediaType != "multipart/form-data" {
+			t.Fatalf("content-type = %q", r.Header.Get("Content-Type"))
+		}
+		reader := multipart.NewReader(r.Body, params["boundary"])
+		for {
+			part, err := reader.NextPart()
+			if err == io.EOF {
+				break
+			}
+			if err != nil {
+				t.Fatalf("next part: %v", err)
+			}
+			data, _ := io.ReadAll(part)
+			switch part.FormName() {
+			case "content":
+				content = string(data)
+			case "message_type":
+				messageType = string(data)
+			case "attachments[]":
+				filename = part.FileName()
+				uploaded = data
+			}
+		}
+		_, _ = w.Write([]byte(`{"id":9,"status":"sent","attachments":[{"id":1,"file_type":"image","content_type":"image/png","file_size":3}]}`))
+	})
+
+	attachment := &core.Attachment{Filename: "pic.png", ContentType: "image/png", Data: []byte("png")}
+	msg, err := c.CreateMessage(context.Background(), core.MessageRequest{ConversationID: 42, Content: "veja", Attachment: attachment})
+	if err != nil {
+		t.Fatalf("CreateMessage: %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("attachment calls = %d, want 1", calls)
+	}
+	if filename != "pic.png" || string(uploaded) != "png" || content != "veja" || messageType != "outgoing" {
+		t.Fatalf("multipart = filename %q content %q type %q upload %q", filename, content, messageType, uploaded)
+	}
+	if len(msg.Attachments) != 1 || msg.Attachments[0].ContentType != "image/png" {
+		t.Fatalf("message = %#v", msg)
 	}
 }
 
@@ -641,7 +745,7 @@ func TestRedirectsAreNotFollowed(t *testing.T) {
 			base := source.Client()
 			c := NewClient(core.Settings{BaseURL: source.URL, AccountID: 7, Token: testToken}, base)
 
-			_, err := c.CreateMessage(context.Background(), 42, "Olá")
+			_, err := c.CreateMessage(context.Background(), core.MessageRequest{ConversationID: 42, Content: "Olá"})
 			requireKind(t, err, KindTransport)
 			if sourceHits != 1 {
 				t.Fatalf("source hits = %d, want 1", sourceHits)
