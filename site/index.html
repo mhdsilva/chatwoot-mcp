@@ -1,0 +1,233 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="Conecte Claude, Codex e outros clientes MCP ao seu Chatwoot para localizar contatos, ler conversas e responder clientes." />
+    <meta name="theme-color" content="#0d2a4a" />
+    <title>Chatwoot MCP — atendimento com contexto para sua IA</title>
+    <link rel="icon" href="./assets/mark.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="./style.css" />
+    <script src="./script.js" defer></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#conteudo">Pular para o conteúdo</a>
+
+    <header class="site-header" data-header>
+      <div class="shell header-inner">
+        <a class="brand" href="#topo" aria-label="Chatwoot MCP, início">
+          <span class="brand-mark" aria-hidden="true">C</span>
+          <span>Chatwoot MCP</span>
+        </a>
+
+        <button class="menu-button" type="button" aria-expanded="false" aria-controls="main-nav" data-menu-button>
+          <span class="sr-only">Abrir menu</span>
+          <span></span><span></span>
+        </button>
+
+        <nav class="main-nav" id="main-nav" aria-label="Navegação principal" data-menu>
+          <a href="#como-funciona">Como funciona</a>
+          <a href="#ferramentas">Ferramentas</a>
+          <a href="#seguranca">Segurança</a>
+          <a href="#perguntas">Perguntas</a>
+          <a class="nav-github" href="https://github.com/mhdsilva/chatwoot-mcp">GitHub <span aria-hidden="true">↗</span></a>
+        </nav>
+      </div>
+    </header>
+
+    <main id="conteudo">
+      <section class="hero" id="topo">
+        <div class="hero-grid shell">
+          <div class="hero-copy reveal">
+            <div class="eyebrow"><span></span> MCP local · código aberto</div>
+            <h1>Seu atendimento no Chatwoot, com o contexto da sua IA.</h1>
+            <p class="hero-lead">Peça ao Claude, ao Codex ou ao seu cliente MCP para encontrar uma conversa, entender o histórico e preparar a próxima resposta — usando a conta Chatwoot que você já tem.</p>
+            <div class="hero-actions">
+              <a class="button button-primary" href="https://github.com/mhdsilva/chatwoot-mcp#configuracao-inicial">Configurar no computador <span aria-hidden="true">→</span></a>
+              <a class="button button-secondary" href="https://github.com/mhdsilva/chatwoot-mcp">Ver código no GitHub</a>
+            </div>
+            <ul class="trust-list" aria-label="Características principais">
+              <li><span aria-hidden="true">✓</span> Uma conta, todas as caixas visíveis</li>
+              <li><span aria-hidden="true">✓</span> Token guardado localmente</li>
+              <li><span aria-hidden="true">✓</span> Licença MIT</li>
+            </ul>
+          </div>
+
+          <div class="demo-wrap reveal" data-delay="1">
+            <div class="orbit orbit-one"></div>
+            <div class="orbit orbit-two"></div>
+            <article class="demo" aria-label="Exemplo ilustrativo de atendimento usando Chatwoot MCP">
+              <div class="demo-topbar">
+                <div class="window-dots" aria-hidden="true"><span></span><span></span><span></span></div>
+                <div class="demo-title"><span class="status-dot"></span> Chatwoot conectado</div>
+                <span class="demo-account">conta #1</span>
+              </div>
+              <div class="demo-tabs" role="tablist" aria-label="Exemplos de uso">
+                <button role="tab" aria-selected="true" data-demo-tab="localizar">Localizar</button>
+                <button role="tab" aria-selected="false" data-demo-tab="entender">Entender</button>
+                <button role="tab" aria-selected="false" data-demo-tab="responder">Responder</button>
+              </div>
+              <div class="demo-body" aria-live="polite" data-demo-body>
+                <div class="message user-message">Ache a conversa do cliente pelo telefone final 7021.</div>
+                <div class="tool-call"><span class="tool-icon">⌁</span><span><strong>search_contacts</strong><small>Busca concluída · 1 contato</small></span><span class="tool-check">✓</span></div>
+                <div class="message agent-message"><span class="avatar">AI</span><p>Encontrei o contato e duas conversas. A mais recente está na caixa WhatsApp e aceita resposta.</p></div>
+              </div>
+              <div class="demo-footer"><span>Exemplo ilustrativo</span><span>Dados fictícios</span></div>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="signal-bar" aria-label="Compatibilidade">
+        <div class="shell signal-inner">
+          <span>Funciona com clientes MCP locais</span>
+          <div class="client-list" aria-label="Exemplos de clientes compatíveis">
+            <span>Claude Desktop</span><i></i><span>Codex</span><i></i><span>Cursor</span><i></i><span>Outros clientes MCP</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="section section-steps" id="como-funciona">
+        <div class="shell">
+          <div class="section-heading reveal">
+            <div class="eyebrow"><span></span> Do zero à primeira consulta</div>
+            <h2>Três passos. Um único executável.</h2>
+            <p>O painel local cuida da configuração. Depois, seu cliente de IA inicia o MCP quando precisar.</p>
+          </div>
+
+          <ol class="steps-grid">
+            <li class="step-card reveal">
+              <span class="step-number">01</span>
+              <div class="step-art step-terminal" aria-hidden="true"><span>$ go build</span><span class="cursor"></span></div>
+              <h3>Compile o projeto</h3>
+              <p>Baixe o código aberto e gere um executável para macOS, Windows ou Linux.</p>
+            </li>
+            <li class="step-card reveal" data-delay="1">
+              <span class="step-number">02</span>
+              <div class="step-art step-panel" aria-hidden="true"><span></span><span></span><b>Conectado</b></div>
+              <h3>Conecte seu Chatwoot</h3>
+              <p>Informe URL, conta e token no painel. A conexão é testada antes de salvar.</p>
+            </li>
+            <li class="step-card reveal" data-delay="2">
+              <span class="step-number">03</span>
+              <div class="step-art step-link" aria-hidden="true"><span>IA</span><i>↔</i><span>CW</span></div>
+              <h3>Adicione ao cliente MCP</h3>
+              <p>Copie a configuração pronta, reinicie o cliente e converse com seus atendimentos.</p>
+            </li>
+          </ol>
+        </div>
+      </section>
+
+      <section class="section tools-section" id="ferramentas">
+        <div class="shell tools-layout">
+          <div class="tools-intro reveal">
+            <div class="eyebrow eyebrow-light"><span></span> Ferramentas atuais</div>
+            <h2>Da busca à resposta, com cada ação explícita.</h2>
+            <p>O MCP separa leitura e envio. Você encontra o atendimento certo, lê o contexto e só então decide se quer responder.</p>
+            <a class="text-link" href="https://github.com/mhdsilva/chatwoot-mcp#ferramentas-da-primeira-versao">Ver documentação das ferramentas <span aria-hidden="true">↗</span></a>
+          </div>
+
+          <div class="tools-list reveal" data-delay="1">
+            <article class="tool-row"><span class="tool-number">01</span><div><code>check_connection</code><p>Confere a conta e o usuário configurados sem expor o token.</p></div><span class="tool-type">diagnóstico</span></article>
+            <article class="tool-row"><span class="tool-number">02</span><div><code>list_conversations</code><p>Lista atendimentos por página, estado e caixa de entrada.</p></div><span class="tool-type">leitura</span></article>
+            <article class="tool-row"><span class="tool-number">03</span><div><code>get_conversation</code><p>Lê o histórico recente e os metadados seguros de anexos.</p></div><span class="tool-type">leitura</span></article>
+            <article class="tool-row"><span class="tool-number">04</span><div><code>search_contacts</code><p>Localiza contatos por nome, e-mail ou telefone.</p></div><span class="tool-type">leitura</span></article>
+            <article class="tool-row"><span class="tool-number">05</span><div><code>get_contact_conversations</code><p>Mostra as conversas do contato para escolher o destinatário certo.</p></div><span class="tool-type">leitura</span></article>
+            <article class="tool-row"><span class="tool-number">06</span><div><code>send_reply</code><p>Envia uma única resposta à conversa explicitamente selecionada.</p></div><span class="tool-type tool-type-write">ação</span></article>
+          </div>
+        </div>
+      </section>
+
+      <section class="section evolution-section">
+        <div class="shell evolution-card reveal">
+          <div>
+            <span class="mini-label">EM EVOLUÇÃO</span>
+            <h2>Um MCP para o atendimento completo.</h2>
+            <p>O roadmap inclui notas internas, estados, prioridades, atribuição, etiquetas, anexos, modelos aprovados e manutenção de contatos — sempre respeitando as regras de cada canal.</p>
+          </div>
+          <div class="roadmap-cloud" aria-label="Funcionalidades planejadas">
+            <span>Notas privadas</span><span>Atribuição</span><span>Etiquetas</span><span>Prioridade</span><span>Anexos</span><span>Templates</span><span>Contatos</span><span>Estados</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="section security-section" id="seguranca">
+        <div class="shell security-grid">
+          <div class="security-visual reveal" aria-label="Fluxo local da credencial, do painel para o arquivo protegido e então para o processo MCP">
+            <div class="device-label"><span></span> dentro do seu computador</div>
+            <div class="security-flow">
+              <div class="security-card">
+                <span class="security-step">01 · CONFIGURAR</span>
+                <div class="security-icon panel-icon" aria-hidden="true"><i></i><i></i><i></i></div>
+                <strong>Painel local</strong>
+                <small>127.0.0.1</small>
+              </div>
+              <div class="flow-connector" aria-hidden="true"><span></span><b>↓</b></div>
+              <div class="security-card security-card-key">
+                <span class="security-step">02 · GUARDAR</span>
+                <div class="security-icon key-icon" aria-hidden="true"><span>••••••••</span></div>
+                <strong>Arquivo protegido</strong>
+                <small>permissão 0600</small>
+              </div>
+              <div class="flow-connector" aria-hidden="true"><span></span><b>↓</b></div>
+              <div class="security-card">
+                <span class="security-step">03 · USAR</span>
+                <div class="security-icon mcp-icon" aria-hidden="true">MCP</div>
+                <strong>Processo local</strong>
+                <small>token fora da conversa</small>
+              </div>
+            </div>
+            <div class="device-footer"><span class="status-dot"></span> O cliente de IA recebe resultados, nunca a credencial</div>
+          </div>
+          <div class="security-copy reveal" data-delay="1">
+            <div class="eyebrow"><span></span> Segurança por desenho</div>
+            <h2>Seu token não precisa entrar na conversa.</h2>
+            <p>A credencial é configurada no painel local e armazenada em um arquivo restrito do usuário. Os blocos de configuração dos clientes MCP apontam apenas para o executável.</p>
+            <ul class="detail-list">
+              <li><span>01</span><div><strong>Painel em loopback</strong><p>A interface escuta somente no seu computador.</p></div></li>
+              <li><span>02</span><div><strong>Permissões do Chatwoot</strong><p>O MCP só acessa o que o token do usuário já permite.</p></div></li>
+              <li><span>03</span><div><strong>Envio sem repetição automática</strong><p>Falhas ambíguas não geram uma segunda mensagem por conta própria.</p></div></li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <section class="section faq-section" id="perguntas">
+        <div class="shell faq-grid">
+          <div class="section-heading reveal">
+            <div class="eyebrow"><span></span> Perguntas frequentes</div>
+            <h2>Antes de conectar.</h2>
+          </div>
+          <div class="faq-list reveal" data-delay="1">
+            <details><summary>Preciso deixar o painel aberto?</summary><p>Não. O painel configura e testa a conexão. Depois de salvo, o cliente de IA inicia o comando MCP diretamente.</p></details>
+            <details><summary>Funciona com qualquer Chatwoot?</summary><p>O projeto usa a Application API do Chatwoot. Você precisa da URL da instalação, do ID da conta e de um token pessoal com as permissões necessárias.</p></details>
+            <details><summary>As mensagens são copiadas para outro banco?</summary><p>Não na versão atual. O MCP consulta a API do Chatwoot quando uma ferramenta é chamada e não mantém um índice próprio das conversas.</p></details>
+            <details><summary>A IA pode enviar mensagem sem eu pedir?</summary><p>Leituras e envios são ferramentas separadas. Uma resposta exige uma chamada explícita com o ID da conversa e o texto; seu cliente de IA ainda pode aplicar suas próprias regras de confirmação.</p></details>
+            <details><summary>Posso usar pelo celular ou pela web?</summary><p>A versão atual usa MCP local por stdio, então o cliente precisa rodar no mesmo computador. Um transporte remoto seguro está no roadmap.</p></details>
+            <details><summary>É gratuito?</summary><p>O Chatwoot MCP é um projeto aberto sob licença MIT. Sua instalação Chatwoot e o cliente de IA podem ter custos próprios.</p></details>
+          </div>
+        </div>
+      </section>
+
+      <section class="final-cta">
+        <div class="shell final-cta-inner reveal">
+          <div class="eyebrow eyebrow-light"><span></span> Comece pelo código</div>
+          <h2>Dê contexto de atendimento à sua IA.</h2>
+          <p>Configure localmente, conecte seu cliente MCP e faça a primeira consulta em poucos passos.</p>
+          <div class="hero-actions">
+            <a class="button button-white" href="https://github.com/mhdsilva/chatwoot-mcp#configuracao-inicial">Ver como instalar <span aria-hidden="true">→</span></a>
+            <a class="button button-ghost" href="https://github.com/mhdsilva/chatwoot-mcp">github.com/mhdsilva/chatwoot-mcp</a>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <div class="shell footer-inner">
+        <a class="brand brand-footer" href="#topo"><span class="brand-mark" aria-hidden="true">C</span><span>Chatwoot MCP</span></a>
+        <p>Código aberto sob licença MIT. Projeto independente para a Application API do Chatwoot.</p>
+        <div><a href="https://github.com/mhdsilva/chatwoot-mcp">GitHub</a><a href="https://github.com/mhdsilva/chatwoot-mcp/blob/main/README.md">Documentação</a></div>
+      </div>
+    </footer>
+  </body>
+</html>
