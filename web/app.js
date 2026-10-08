@@ -153,5 +153,25 @@
     }
   });
 
+  async function installClient(client, label) {
+    const status = $('install-status');
+    const confirmed = window.confirm(`Adicionar o servidor "chatwoot" ao ${label}? Um backup da configuração atual será criado.`);
+    if (!confirmed) return;
+    status.textContent = 'Configurando…';
+    try {
+      const result = await requestJSON('/api/configure-client', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
+        body: JSON.stringify({ client, confirm: true }),
+      });
+      status.textContent = result.message || 'Cliente configurado.';
+    } catch (error) {
+      status.textContent = readableError(error);
+    }
+  }
+
+  $('install-claude')?.addEventListener('click', () => installClient('claude', 'Claude Desktop'));
+  $('install-codex')?.addEventListener('click', () => installClient('codex', 'Codex'));
+
   Promise.all([loadStatus(), loadClientConfig(), loadTools()]);
 })();

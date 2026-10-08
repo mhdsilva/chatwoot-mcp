@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Chatwoot MCP
+GenericName=Chatwoot atendimento MCP
+Comment=Operar o atendimento do Chatwoot a partir de um cliente de IA
+Exec=chatwoot-mcp app
+Icon=chatwoot-mcp
+Terminal=false
+Categories=Utility;Office;
+Keywords=chatwoot;mcp;atendimento;
+StartupNotify=false

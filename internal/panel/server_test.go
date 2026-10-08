@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	"chatwoot-mcp/internal/clientconfig"
 	"chatwoot-mcp/internal/core"
 	"chatwoot-mcp/internal/panel"
 )
@@ -352,5 +353,50 @@ func TestClientConfigUsesAbsoluteRunningExecutableWithoutToken(t *testing.T) {
 	}
 	if strings.Contains(w.Body.String(), token) {
 		t.Fatal("client config leaked saved token")
+	}
+}
+
+func TestConfigureClientPreviewAndApply(t *testing.T) {
+	store := &memoryStore{}
+	applied := 0
+	h, err := panel.NewHandlerWithOptions(store, func(core.Settings) core.API { return fakeAPI{} }, 8765, panel.HandlerOptions{
+		Detect: func(client clientconfig.Client) (clientconfig.Target, error) {
+			return clientconfig.Target{Client: client, Path: "/tmp/" + string(client) + ".json", Exists: true}, nil
+		},
+		Plan: func(target clientconfig.Target, command string) (clientconfig.Plan, error) {
+			return clientconfig.Plan{Target: target, Command: command, Changed: true}, nil
+		},
+		Apply:      func(clientconfig.Plan) (string, error) { applied++; return "/tmp/backup.bak", nil },
+		Executable: func() (string, error) { return "/usr/local/bin/chatwoot-mcp", nil },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	csrf := pageToken(t, h)
+
+	w := request(t, h, "GET", "/api/client-targets", "", "")
+	if w.Code != 200 || !strings.Contains(w.Body.String(), "/tmp/claude.json") || !strings.Contains(w.Body.String(), "/tmp/codex.json") {
+		t.Fatalf("targets: %d %s", w.Code, w.Body.String())
+	}
+
+	w = request(t, h, "POST", "/api/configure-client", `{"client":"claude","confirm":false}`, csrf)
+	if w.Code != 200 || applied != 0 {
+		t.Fatalf("preview applied a change: %d %s (applied=%d)", w.Code, w.Body.String(), applied)
+	}
+	if !strings.Contains(w.Body.String(), `"changed":true`) {
+		t.Fatalf("preview missing changed flag: %s", w.Body.String())
+	}
+
+	w = request(t, h, "POST", "/api/configure-client", `{"client":"claude","confirm":true}`, csrf)
+	if w.Code != 200 || applied != 1 {
+		t.Fatalf("apply failed: %d %s (applied=%d)", w.Code, w.Body.String(), applied)
+	}
+	if !strings.Contains(w.Body.String(), "/tmp/backup.bak") {
+		t.Fatalf("apply missing backup path: %s", w.Body.String())
+	}
+
+	w = request(t, h, "POST", "/api/configure-client", `{"client":"cursor","confirm":true}`, csrf)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("unknown client accepted: %d", w.Code)
 	}
 }

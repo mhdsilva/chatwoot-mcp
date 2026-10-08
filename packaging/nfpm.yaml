@@ -1,0 +1,23 @@
+name: chatwoot-mcp
+arch: ${ARCH}
+platform: linux
+version: ${VERSION}
+version_schema: semver
+section: utils
+priority: optional
+maintainer: Chatwoot MCP <mhdsilva@users.noreply.github.com>
+description: |
+  Local MCP server to operate Chatwoot atendimento from an AI client.
+  Ships a loopback setup panel and a system tray app.
+vendor: Chatwoot MCP
+homepage: https://github.com/mhdsilva/chatwoot-mcp
+license: MIT
+contents:
+  - src: dist/chatwoot-mcp
+    dst: /usr/bin/chatwoot-mcp
+    file_info:
+      mode: 0755
+  - src: packaging/linux/chatwoot-mcp.desktop
+    dst: /usr/share/applications/chatwoot-mcp.desktop
+  - src: packaging/AppIcon.png
+    dst: /usr/share/icons/hicolor/512x512/apps/chatwoot-mcp.png

@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 
+	"chatwoot-mcp/internal/app"
+	"chatwoot-mcp/internal/clientconfig"
 	"chatwoot-mcp/internal/config"
 	"chatwoot-mcp/internal/core"
 	"chatwoot-mcp/internal/panel"
@@ -62,6 +64,134 @@ func TestMCPUnconfiguredWritesNoStdout(t *testing.T) {
 	}
 	if stdout.Len() != 0 {
 		t.Fatalf("unexpected stdout: %q", stdout.String())
+	}
+}
+
+func TestAppRunnerReceivesSharedDependencies(t *testing.T) {
+	var stderr bytes.Buffer
+	called := false
+	serveApp := func(_ context.Context, opts app.Options) error {
+		called = true
+		if opts.Store == nil {
+			t.Fatal("app runner received nil store")
+		}
+		if opts.Factory == nil {
+			t.Fatal("app runner received nil client factory")
+		}
+		if opts.Port != panelPort {
+			t.Fatalf("port = %d, want %d", opts.Port, panelPort)
+		}
+		if opts.OpenBrowser == nil || opts.Diagnostics == nil {
+			t.Fatal("app runner received nil browser or diagnostics")
+		}
+		return nil
+	}
+	if err := runAppWith(context.Background(), &stderr, func(string) error { return nil }, serveApp); err != nil {
+		t.Fatalf("runAppWith: %v", err)
+	}
+	if !called {
+		t.Fatal("app runner was not called")
+	}
+}
+
+func TestConfigureClientDryRunDoesNotWrite(t *testing.T) {
+	applyCalls := 0
+	deps := configureDeps{
+		detect: func(clientconfig.Client) (clientconfig.Target, error) {
+			return clientconfig.Target{Client: clientconfig.Claude, Path: "/home/ana/.config/Claude/claude_desktop_config.json"}, nil
+		},
+		plan: func(clientconfig.Target, string) (clientconfig.Plan, error) {
+			return clientconfig.Plan{Changed: true}, nil
+		},
+		apply:      func(clientconfig.Plan) (string, error) { applyCalls++; return "", nil },
+		executable: func() (string, error) { return "/usr/local/bin/chatwoot-mcp", nil },
+	}
+	var stdout, stderr bytes.Buffer
+	if err := runConfigureClient([]string{"--client", "claude", "--dry-run"}, &stderr, &stdout, strings.NewReader(""), deps); err != nil {
+		t.Fatalf("runConfigureClient: %v", err)
+	}
+	if applyCalls != 0 {
+		t.Fatal("dry-run wrote the config")
+	}
+	if !strings.Contains(stdout.String(), "would update") {
+		t.Fatalf("plan not printed: %q", stdout.String())
+	}
+}
+
+func TestConfigureClientRequiresConfirmation(t *testing.T) {
+	applyCalls := 0
+	deps := configureDeps{
+		detect: func(clientconfig.Client) (clientconfig.Target, error) {
+			return clientconfig.Target{Client: clientconfig.Claude, Path: "/tmp/claude.json"}, nil
+		},
+		plan: func(clientconfig.Target, string) (clientconfig.Plan, error) {
+			return clientconfig.Plan{Changed: true}, nil
+		},
+		apply:      func(clientconfig.Plan) (string, error) { applyCalls++; return "", nil },
+		executable: func() (string, error) { return "/usr/local/bin/chatwoot-mcp", nil },
+	}
+	var stdout, stderr bytes.Buffer
+	if err := runConfigureClient([]string{"--client", "claude"}, &stderr, &stdout, strings.NewReader("n\n"), deps); err != nil {
+		t.Fatalf("runConfigureClient: %v", err)
+	}
+	if applyCalls != 0 {
+		t.Fatal("declined confirmation still wrote the config")
+	}
+	if !strings.Contains(stdout.String(), "skipped") {
+		t.Fatalf("skip not reported: %q", stdout.String())
+	}
+}
+
+func TestConfigureClientAppliesWithYesAndReportsBackup(t *testing.T) {
+	applyCalls := 0
+	commandUsed := ""
+	deps := configureDeps{
+		detect: func(clientconfig.Client) (clientconfig.Target, error) {
+			return clientconfig.Target{Client: clientconfig.Codex, Path: "/home/ana/.codex/config.toml"}, nil
+		},
+		plan: func(_ clientconfig.Target, command string) (clientconfig.Plan, error) {
+			commandUsed = command
+			return clientconfig.Plan{Changed: true}, nil
+		},
+		apply:      func(clientconfig.Plan) (string, error) { applyCalls++; return "/home/ana/.codex/config.toml.bak", nil },
+		executable: func() (string, error) { return "/usr/local/bin/chatwoot-mcp", nil },
+	}
+	var stdout, stderr bytes.Buffer
+	if err := runConfigureClient([]string{"--client", "codex", "--yes"}, &stderr, &stdout, strings.NewReader(""), deps); err != nil {
+		t.Fatalf("runConfigureClient: %v", err)
+	}
+	if applyCalls != 1 {
+		t.Fatalf("apply calls = %d, want 1", applyCalls)
+	}
+	if commandUsed != "/usr/local/bin/chatwoot-mcp" {
+		t.Fatalf("command = %q, want the executable path", commandUsed)
+	}
+	if !strings.Contains(stdout.String(), "backup: /home/ana/.codex/config.toml.bak") {
+		t.Fatalf("backup not reported: %q", stdout.String())
+	}
+}
+
+func TestConfigureClientAlreadyConfiguredSkipsWrite(t *testing.T) {
+	applyCalls := 0
+	deps := configureDeps{
+		detect: func(clientconfig.Client) (clientconfig.Target, error) {
+			return clientconfig.Target{Client: clientconfig.Claude, Path: "/tmp/claude.json"}, nil
+		},
+		plan: func(clientconfig.Target, string) (clientconfig.Plan, error) {
+			return clientconfig.Plan{Changed: false}, nil
+		},
+		apply:      func(clientconfig.Plan) (string, error) { applyCalls++; return "", nil },
+		executable: func() (string, error) { return "/usr/local/bin/chatwoot-mcp", nil },
+	}
+	var stdout, stderr bytes.Buffer
+	if err := runConfigureClient([]string{"--client", "claude", "--yes"}, &stderr, &stdout, strings.NewReader(""), deps); err != nil {
+		t.Fatalf("runConfigureClient: %v", err)
+	}
+	if applyCalls != 0 {
+		t.Fatal("already-configured client was rewritten")
+	}
+	if !strings.Contains(stdout.String(), "already configured") {
+		t.Fatalf("no-change not reported: %q", stdout.String())
 	}
 }
 
@@ -140,7 +270,7 @@ func TestRunWithUsageErrors(t *testing.T) {
 			if err == nil {
 				t.Fatal("expected usage error")
 			}
-			if !strings.Contains(stderr.String(), "usage: chatwoot-mcp <panel|mcp>") {
+			if !strings.Contains(stderr.String(), "usage: chatwoot-mcp <app|panel|mcp|configure-client|version>") {
 				t.Fatalf("usage missing from stderr: %q", stderr.String())
 			}
 			if stdout.Len() != 0 {

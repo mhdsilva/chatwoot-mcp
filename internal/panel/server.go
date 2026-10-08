@@ -19,6 +19,7 @@ import (
 	"strings"
 	"time"
 
+	"chatwoot-mcp/internal/clientconfig"
 	"chatwoot-mcp/internal/core"
 	"chatwoot-mcp/web"
 )
@@ -33,11 +34,31 @@ type handler struct {
 	csrf     string
 	port     int
 	template *template.Template
+
+	detectClient func(clientconfig.Client) (clientconfig.Target, error)
+	planClient   func(clientconfig.Target, string) (clientconfig.Plan, error)
+	applyClient  func(clientconfig.Plan) (string, error)
+	executable   func() (string, error)
+}
+
+// HandlerOptions overrides the client-configuration dependencies. Zero values
+// use the real implementations, which is what the running panel needs.
+type HandlerOptions struct {
+	Detect     func(clientconfig.Client) (clientconfig.Target, error)
+	Plan       func(clientconfig.Target, string) (clientconfig.Plan, error)
+	Apply      func(clientconfig.Plan) (string, error)
+	Executable func() (string, error)
 }
 
 // NewHandler returns the panel handler for the supplied loopback port. Host
 // and Origin checks accept only 127.0.0.1 or localhost on that exact port.
 func NewHandler(store core.Store, factory ClientFactory, port int) (http.Handler, error) {
+	return NewHandlerWithOptions(store, factory, port, HandlerOptions{})
+}
+
+// NewHandlerWithOptions builds the panel handler with explicit client
+// configuration dependencies, so the endpoints are testable.
+func NewHandlerWithOptions(store core.Store, factory ClientFactory, port int, opts HandlerOptions) (http.Handler, error) {
 	if store == nil || factory == nil {
 		return nil, errors.New("panel store and client factory are required")
 	}
@@ -52,7 +73,29 @@ func NewHandler(store core.Store, factory ClientFactory, port int) (http.Handler
 	if _, err := rand.Read(tokenBytes[:]); err != nil {
 		return nil, errors.New("create panel session token")
 	}
-	h := &handler{store: store, factory: factory, csrf: hex.EncodeToString(tokenBytes[:]), port: port, template: index}
+	h := &handler{
+		store:        store,
+		factory:      factory,
+		csrf:         hex.EncodeToString(tokenBytes[:]),
+		port:         port,
+		template:     index,
+		detectClient: opts.Detect,
+		planClient:   opts.Plan,
+		applyClient:  opts.Apply,
+		executable:   opts.Executable,
+	}
+	if h.detectClient == nil {
+		h.detectClient = clientconfig.Detect
+	}
+	if h.planClient == nil {
+		h.planClient = clientconfig.PlanFor
+	}
+	if h.applyClient == nil {
+		h.applyClient = clientconfig.Apply
+	}
+	if h.executable == nil {
+		h.executable = os.Executable
+	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /", h.page)
 	mux.HandleFunc("GET /app.js", h.asset("app.js", "text/javascript; charset=utf-8"))
@@ -60,6 +103,8 @@ func NewHandler(store core.Store, factory ClientFactory, port int) (http.Handler
 	mux.HandleFunc("GET /api/status", h.status)
 	mux.HandleFunc("POST /api/setup", h.setup)
 	mux.HandleFunc("GET /api/client-config", h.clientConfig)
+	mux.HandleFunc("GET /api/client-targets", h.clientTargets)
+	mux.HandleFunc("POST /api/configure-client", h.configureClient)
 	mux.HandleFunc("GET /api/tools", h.tools)
 	return h.protect(mux), nil
 }
@@ -75,7 +120,14 @@ func ListenAndServe(ctx context.Context, store core.Store, factory ClientFactory
 		return fmt.Errorf("listen on loopback: %w", err)
 	}
 	actualPort := listener.Addr().(*net.TCPAddr).Port
-	h, err := NewHandler(store, factory, actualPort)
+	return Serve(ctx, listener, store, factory, actualPort)
+}
+
+// Serve serves the panel on an already-bound loopback listener until ctx is
+// cancelled. port is the actual listener port used for host and origin checks.
+// It closes the listener if the handler cannot be built.
+func Serve(ctx context.Context, listener net.Listener, store core.Store, factory ClientFactory, port int) error {
+	h, err := NewHandler(store, factory, port)
 	if err != nil {
 		_ = listener.Close()
 		return err
@@ -262,6 +314,89 @@ func (h *handler) clientConfig(w http.ResponseWriter, r *http.Request) {
 func (h *handler) tools(w http.ResponseWriter, r *http.Request) {
 	noStore(w)
 	jsonResponse(w, http.StatusOK, map[string]any{"tools": toolsCatalog})
+}
+
+func (h *handler) clientTargets(w http.ResponseWriter, r *http.Request) {
+	noStore(w)
+	targets := make([]clientconfig.Target, 0, 2)
+	for _, client := range clientconfig.Supported() {
+		target, err := h.detectClient(client)
+		if err != nil {
+			jsonError(w, http.StatusInternalServerError, "Não foi possível localizar a configuração do cliente.")
+			return
+		}
+		targets = append(targets, target)
+	}
+	jsonResponse(w, http.StatusOK, map[string]any{"targets": targets})
+}
+
+type configureClientRequest struct {
+	Client  string `json:"client"`
+	Confirm bool   `json:"confirm"`
+}
+
+// configureClient previews or applies the MCP client registration. Without
+// confirm it only returns the plan, so the browser can show what will change.
+func (h *handler) configureClient(w http.ResponseWriter, r *http.Request) {
+	noStore(w)
+	r.Body = http.MaxBytesReader(w, r.Body, maxSetupBody)
+	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields()
+	var input configureClientRequest
+	if err := dec.Decode(&input); err != nil {
+		jsonError(w, http.StatusBadRequest, "Dados inválidos.")
+		return
+	}
+
+	client, err := clientconfig.ParseClient(input.Client)
+	if err != nil {
+		jsonError(w, http.StatusBadRequest, "Cliente desconhecido; use claude ou codex.")
+		return
+	}
+	executable, err := h.executable()
+	if err != nil {
+		jsonError(w, http.StatusInternalServerError, "Não foi possível determinar o caminho do executável.")
+		return
+	}
+	target, err := h.detectClient(client)
+	if err != nil {
+		jsonError(w, http.StatusInternalServerError, "Não foi possível localizar a configuração do cliente.")
+		return
+	}
+	plan, err := h.planClient(target, executable)
+	if err != nil {
+		jsonError(w, http.StatusBadGateway, "A configuração existente não pôde ser interpretada; nenhum arquivo foi alterado.")
+		return
+	}
+
+	result := map[string]any{
+		"client":     client,
+		"path":       target.Path,
+		"changed":    plan.Changed,
+		"applied":    false,
+		"executable": executable,
+	}
+	if !input.Confirm {
+		jsonResponse(w, http.StatusOK, result)
+		return
+	}
+	if !plan.Changed {
+		result["applied"] = true
+		result["message"] = "O cliente já estava configurado."
+		jsonResponse(w, http.StatusOK, result)
+		return
+	}
+	backup, err := h.applyClient(plan)
+	if err != nil {
+		jsonError(w, http.StatusInternalServerError, "Não foi possível gravar a configuração do cliente.")
+		return
+	}
+	result["applied"] = true
+	if backup != "" {
+		result["backup"] = backup
+	}
+	result["message"] = "Cliente configurado. Reinicie o cliente MCP."
+	jsonResponse(w, http.StatusOK, result)
 }
 
 func noStore(w http.ResponseWriter) { w.Header().Set("Cache-Control", "no-store") }

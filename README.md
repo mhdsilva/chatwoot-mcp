@@ -1,35 +1,67 @@
 # Chatwoot MCP
 
-Servidor MCP local para operar o atendimento no Chatwoot: consultar conversas, responder clientes, anotar, atribuir, organizar e resolver. O executável oferece um painel de configuração no navegador e um servidor MCP por `stdio` para clientes instalados no mesmo computador. Uma configuração atende uma instalação e um `account_id`; o acesso continua limitado às permissões do token pessoal do Chatwoot.
+Servidor MCP local para operar o atendimento no Chatwoot: consultar conversas, responder clientes, anotar, atribuir, organizar e resolver. O executável oferece um aplicativo de bandeja que sobe um painel de configuração no navegador e um servidor MCP por `stdio` para clientes instalados no mesmo computador. Uma configuração atende uma instalação e um `account_id`; o acesso continua limitado às permissões do token pessoal do Chatwoot.
 
 ## Requisitos
 
-- Go 1.25 ou posterior para compilar.
 - Uma URL de uma instalação Chatwoot, o ID da conta e um token pessoal de usuário com as permissões necessárias.
+- Go 1.25 ou posterior, apenas para compilar a partir do código.
 
-## Compilar
+## Instalação
 
-Na raiz deste repositório:
+Baixe o pacote do seu sistema na página de [releases](https://github.com/mhdsilva/chatwoot-mcp/releases) e instale:
+
+- **macOS**: abra o `.dmg` e arraste o app para Aplicações.
+- **Windows**: execute o instalador `.exe`. O assistente oferece registrar o servidor no Claude Desktop e no Codex.
+- **Linux**: instale o `.deb` (`sudo dpkg -i ...` ou `sudo apt install ./...`) ou o `.rpm`.
+
+Instruções detalhadas, compilação e desinstalação estão em [docs/installation.md](docs/installation.md).
+
+## Compilar a partir do código
+
+```sh
+make build          # bin/chatwoot-mcp
+make test           # go test ./...
+make dist           # binários para macOS, Windows e Linux (sem CGO)
+```
+
+Sem `make`:
 
 ```sh
 go build -o ./bin/chatwoot-mcp ./cmd/chatwoot-mcp
 ```
 
-O executável compilado fica em `./bin/chatwoot-mcp`. Mantenha-o em um caminho estável, pois o cliente MCP local inicia esse arquivo diretamente.
+Mantenha o executável em um caminho estável, pois o cliente MCP local inicia esse arquivo diretamente.
 
 ## Configuração inicial
 
-Inicie o painel:
+Inicie o aplicativo de bandeja, que sobe o painel e abre o navegador:
 
 ```sh
-./bin/chatwoot-mcp panel
+./bin/chatwoot-mcp app
 ```
 
-O painel local deve abrir no navegador e escutar somente em `127.0.0.1`. Informe a URL base da instalação (por exemplo, `https://chatwoot.exemplo.com`), o `account_id` e o token pessoal. O painel testa a conexão antes de salvar; o token salvo não é exibido novamente nem incluído nos trechos de configuração do cliente. O arquivo local de configuração é gravado com acesso restrito. Para detalhes de armazenamento e solução de problemas, consulte [docs/configuration.md](docs/configuration.md).
+Se preferir apenas o painel no terminal, use `./bin/chatwoot-mcp panel`. O painel escuta somente em `127.0.0.1`. Informe a URL base da instalação (por exemplo, `https://chatwoot.exemplo.com`), o `account_id` e o token pessoal. O painel testa a conexão antes de salvar; o token salvo não é exibido novamente nem incluído nos trechos de configuração do cliente. O arquivo local de configuração é gravado com acesso restrito. Para detalhes de armazenamento e solução de problemas, consulte [docs/configuration.md](docs/configuration.md).
+
+O ícone da bandeja oferece **Abrir painel** e **Sair**. Se a bandeja não estiver disponível (sessão gráfica ausente, servidor headless), o app continua rodando sem bandeja e informa a URL do painel.
 
 ## Conectar um cliente MCP local
 
-O cliente precisa conseguir executar o binário local. A configuração aponta para o executável e passa o subcomando `mcp`; não inclua URL, ID da conta ou token nos argumentos. Substitua `/caminho/absoluto/chatwoot-mcp` pelo caminho real do binário.
+Há duas formas: registrar automaticamente pelo painel ou pelo comando abaixo, ou editar a configuração do cliente à mão.
+
+### Registro automático
+
+O painel tem os botões **Instalar no Claude Desktop** e **Instalar no Codex**, que pedem confirmação no navegador. Pela linha de comando:
+
+```sh
+./bin/chatwoot-mcp configure-client --client claude   # ou codex, ou all
+```
+
+Sem `--yes`, o comando mostra o que será alterado e pede confirmação. Use `--dry-run` para apenas visualizar. Antes de qualquer alteração, um backup do arquivo existente é criado ao lado dele (por exemplo, `claude_desktop_config.json.chatwoot-mcp.<data>.bak`). Outros servidores, chaves e comentários do arquivo são preservados.
+
+### Configuração manual
+
+A configuração aponta para o executável e passa o subcomando `mcp`; não inclua URL, ID da conta ou token nos argumentos. Substitua `/caminho/absoluto/chatwoot-mcp` pelo caminho real do binário.
 
 ### Claude Desktop
 
