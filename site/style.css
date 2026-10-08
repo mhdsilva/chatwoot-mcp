@@ -120,7 +120,7 @@ button { font: inherit; }
 
 .tools-section { color: white; background: var(--navy-deep); }
 .tools-heading { display: grid; grid-template-columns: 1.2fr .8fr; gap: 70px; align-items: end; }.tools-heading > p { margin: 0 0 6px; color: #9fb1c1; font-size: 13px; line-height: 1.7; }.eyebrow-light { color: var(--mint); }
-.capability-grid { display: grid; grid-template-columns: repeat(4,1fr); gap: 10px; margin-top: 58px; }
+.capability-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 10px; margin-top: 58px; }
 .capability { min-width: 0; min-height: 375px; padding: 24px 20px; background: rgba(255,255,255,.045); border: 1px solid rgba(255,255,255,.1); border-radius: 14px; }
 .capability-icon { display: grid; place-items: center; width: 36px; height: 36px; color: var(--mint); background: rgba(101,217,182,.1); border-radius: 10px; font: 9px var(--mono); }.capability h3 { margin: 26px 0 10px; font-size: 17px; }.capability > p { min-height: 58px; margin: 0; color: #8fa5b8; font-size: 11px; line-height: 1.65; }.capability ul { padding: 0; margin: 22px 0 0; list-style: none; }.capability li { padding: 8px 0; border-top: 1px solid rgba(255,255,255,.09); }.capability code { color: #c5d7e7; font: 8px var(--mono); }.capability small { display: block; margin-top: 12px; color: #6f879a; font-size: 8px; }
 

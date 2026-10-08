@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="description" content="Conecte seu agente de IA ao Chatwoot para consultar, organizar e resolver atendimentos com contexto." />
+    <meta name="description" content="Conecte seu agente de IA ao Chatwoot para organizar atendimentos e consultar fila de espera, tempos de resposta e métricas." />
     <meta name="theme-color" content="#081d32" />
     <link rel="canonical" href="https://chatwoot-mcp.kairootech.com.br/" />
 
@@ -11,7 +11,7 @@
     <meta property="og:locale" content="pt_BR" />
     <meta property="og:site_name" content="Chatwoot MCP" />
     <meta property="og:title" content="Chatwoot MCP — transforme conversas em trabalho resolvido" />
-    <meta property="og:description" content="Consulte, organize e resolva atendimentos do Chatwoot com seu agente de IA." />
+    <meta property="og:description" content="Organize atendimentos e consulte fila de espera, tempos de resposta e métricas do Chatwoot com seu agente de IA." />
     <meta property="og:url" content="https://chatwoot-mcp.kairootech.com.br/" />
     <meta property="og:image" content="https://chatwoot-mcp.kairootech.com.br/assets/social-card.png?v=3" />
     <meta property="og:image:secure_url" content="https://chatwoot-mcp.kairootech.com.br/assets/social-card.png?v=3" />
@@ -22,7 +22,7 @@
 
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content="Chatwoot MCP — transforme conversas em trabalho resolvido" />
-    <meta name="twitter:description" content="Consulte, organize e resolva atendimentos do Chatwoot com seu agente de IA." />
+    <meta name="twitter:description" content="Organize atendimentos e consulte fila de espera, tempos de resposta e métricas do Chatwoot com seu agente de IA." />
     <meta name="twitter:image" content="https://chatwoot-mcp.kairootech.com.br/assets/social-card.png?v=3" />
     <meta name="twitter:image:alt" content="Chatwoot MCP mostrando um quadro de operações de atendimento" />
 
@@ -58,7 +58,7 @@
         <div class="shell hero-copy reveal">
           <div class="eyebrow"><span></span> MCP local · open source</div>
           <h1>Transforme conversas em trabalho resolvido.</h1>
-          <p>Seu agente consulta o histórico, organiza a fila e executa ações no Chatwoot com ferramentas claras para cada etapa do atendimento.</p>
+          <p>Seu agente consulta o histórico, organiza a fila, acompanha tempos de resposta e compara a operação no Chatwoot com ferramentas claras para cada etapa.</p>
           <div class="hero-actions">
             <a class="button button-primary" href="#instalacao">Conectar meu Chatwoot <span aria-hidden="true">→</span></a>
             <a class="button button-secondary" href="https://github.com/mhdsilva/chatwoot-mcp">Explorar o código</a>
@@ -194,6 +194,7 @@
             <article class="capability reveal" data-delay="1"><div class="capability-icon">02</div><h3>Roteamento</h3><p>Organize a fila e entregue cada caso à pessoa certa.</p><ul><li><code>list_inboxes</code></li><li><code>list_agents</code></li><li><code>assign_conversation</code></li><li><code>get_conversation_labels</code></li><li><code>add_conversation_labels</code></li></ul></article>
             <article class="capability reveal" data-delay="2"><div class="capability-icon">03</div><h3>Mensagens</h3><p>Use o formato aceito por cada canal para responder.</p><ul><li><code>send_reply</code></li><li><code>send_attachment</code></li><li><code>list_message_templates</code></li><li><code>send_template</code></li></ul><small>Recursos variam conforme o canal.</small></article>
             <article class="capability reveal" data-delay="3"><div class="capability-icon">04</div><h3>Contatos</h3><p>Encontre, atualize e inicie novos atendimentos.</p><ul><li><code>search_contacts</code></li><li><code>get_contact</code></li><li><code>update_contact</code></li><li><code>create_conversation</code></li></ul></article>
+            <article class="capability reveal"><div class="capability-icon">05</div><h3>Analytics</h3><p>Encontre as esperas mais longas, entenda tempos de resposta e resolução e compare o desempenho da operação.</p><ul><li><code>list_attention_queue</code></li><li><code>get_analytics_summary</code></li><li><code>get_conversation_metrics</code></li><li><code>compare_performance</code></li></ul><small>Métricas e tempos disponíveis variam conforme a edição e versão do Chatwoot.</small></article>
           </div>
         </div>
       </section>
