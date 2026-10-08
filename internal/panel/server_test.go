@@ -177,10 +177,32 @@ func TestInitialUnconfiguredStateAndReadEndpoints(t *testing.T) {
 		"get_conversation_labels", "add_conversation_labels", "remove_conversation_labels",
 		"send_attachment", "list_message_templates", "send_template",
 		"get_contact", "update_contact", "create_conversation",
+		"list_attention_queue", "get_analytics_summary", "get_conversation_metrics", "compare_performance",
 	} {
 		if !strings.Contains(w.Body.String(), name) {
 			t.Errorf("tools missing %s", name)
 		}
+	}
+	var payload struct {
+		Tools []panel.Tool `json:"tools"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("tools payload: %v", err)
+	}
+	if len(payload.Tools) != 26 {
+		t.Fatalf("tools count = %d, want 26", len(payload.Tools))
+	}
+	seen := make(map[string]int, len(payload.Tools))
+	for _, tool := range payload.Tools {
+		seen[tool.Name]++
+	}
+	for name, count := range seen {
+		if count != 1 {
+			t.Errorf("tool %s appears %d times, want once", name, count)
+		}
+	}
+	if len(seen) != 26 {
+		t.Fatalf("distinct tools = %d, want 26", len(seen))
 	}
 }
 

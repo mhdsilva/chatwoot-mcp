@@ -16,6 +16,7 @@ import (
 	"strings"
 	"syscall"
 
+	"chatwoot-mcp/internal/analytics"
 	"chatwoot-mcp/internal/app"
 	"chatwoot-mcp/internal/chatwoot"
 	"chatwoot-mcp/internal/clientconfig"
@@ -170,7 +171,7 @@ func confirmed(stdin io.Reader) bool {
 }
 
 type panelRunner func(context.Context, core.Store, panel.ClientFactory, int) error
-type mcpRunner func(context.Context, service.Service, io.Reader, io.Writer) error
+type mcpRunner func(context.Context, service.Service, analytics.Service, io.Reader, io.Writer) error
 type appRunner func(context.Context, app.Options) error
 
 type browserOpener func(string) error
@@ -219,7 +220,9 @@ func runWith(ctx context.Context, args []string, stderr io.Writer, stdin io.Read
 			return err
 		}
 		api := chatwoot.NewClient(settings, nil)
-		return serveMCP(ctx, service.New(api), stdin, stdout)
+		operations := service.New(api)
+		insights := analytics.New(api, api, nil)
+		return serveMCP(ctx, operations, insights, stdin, stdout)
 	default:
 		fmt.Fprintln(stderr, "usage: chatwoot-mcp <app|panel|mcp|configure-client|version>")
 		return fmt.Errorf("unknown command: %s", args[0])

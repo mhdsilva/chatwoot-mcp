@@ -51,7 +51,7 @@ O registro pode ser automático, pelo painel ou pelo comando `chatwoot-mcp confi
 
 ## Ferramentas disponíveis
 
-O servidor MCP expõe vinte e duas ferramentas, agrupadas por finalidade:
+O servidor MCP expõe vinte e seis ferramentas, agrupadas por finalidade:
 
 | Grupo | Ferramentas |
 |---|---|
@@ -60,6 +60,7 @@ O servidor MCP expõe vinte e duas ferramentas, agrupadas por finalidade:
 | Organização e roteamento | `list_inboxes`, `list_agents`, `list_teams`, `assign_conversation`, `get_conversation_labels`, `add_conversation_labels`, `remove_conversation_labels` |
 | Mensagens ricas | `send_attachment`, `list_message_templates`, `send_template` |
 | Contatos e novas conversas | `get_contact`, `update_contact`, `create_conversation` |
+| Análise e relatórios | `list_attention_queue`, `get_analytics_summary`, `get_conversation_metrics`, `compare_performance` |
 
 Mensagens de clientes são dados não confiáveis. A leitura de uma conversa não envia mensagens nem altera estado; cada mutação exige uma chamada explícita com ID positivo e devolve o estado informado pelo Chatwoot.
 
@@ -73,3 +74,10 @@ Mensagens de clientes são dados não confiáveis. A leitura de uma conversa nã
 ### Dependências de versão
 
 Os endpoints usados são os da Application API documentada. `list_message_templates` depende de uma versão que exponha `GET /inboxes/{id}/message_templates`, e `send_template` depende do campo `template_params` em `POST /conversations/{id}/messages`. Em versões anteriores, a operação retorna erro em vez de presumir sucesso.
+
+As ferramentas de análise usam as rotas de relatório nativas (`/reports/summary`, `/summary_reports/...` e `reporting_events`), que variam entre versões e permissões do Chatwoot. A comparação por canal é documentada para o Chatwoot 4.10 ou posterior.
+
+### Solução de problemas
+
+- `forbidden`: o token pessoal não tem permissão para a operação ou para a conta solicitada. Confirme no Chatwoot as permissões do usuário do token e o `account_id` configurado; o servidor não contorna permissões.
+- `unsupported_feature`: a rota de relatório ou de modelos não existe nesta versão da instalação Chatwoot. Verifique a versão da sua instalação e os endpoints que ela expõe; o servidor informa a ausência em vez de presumir sucesso.

@@ -29,4 +29,8 @@ var toolsCatalog = []Tool{
 	{Name: "get_contact", Description: "Lê um contato por id, incluindo identificador e bloqueio."},
 	{Name: "update_contact", Description: "Atualiza campos informados do contato; campos omitidos são preservados."},
 	{Name: "create_conversation", Description: "Cria uma conversa para um contato em canais que permitem iniciação."},
+	{Name: "list_attention_queue", Description: "Lista conversas aguardando atendimento, da espera mais antiga para a mais recente, com metadados apenas; complete e next_page indicam varredura parcial."},
+	{Name: "get_analytics_summary", Description: "Devolve os indicadores oficiais de relatório para um intervalo RFC 3339 e escopo, com o período anterior de igual duração ao lado."},
+	{Name: "get_conversation_metrics", Description: "Devolve os eventos oficiais de uma conversa e um resumo de tempos em segundos; no máximo 50 eventos, com truncamento explícito."},
+	{Name: "compare_performance", Description: "Compara agentes, equipes, caixas ou canais em um intervalo com o período anterior, com deltas absoluto e percentual; somente leitura."},
 }

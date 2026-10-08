@@ -125,6 +125,30 @@ Depois de salvar a configuração, reinicie ou recarregue o cliente MCP. Em cada
 - `update_contact`: atualiza apenas os campos informados; campos omitidos são preservados.
 - `create_conversation`: cria uma conversa para um contato, somente em canais que permitem iniciação (Website, API, Email e SMS/Phone).
 
+### Análise e relatórios
+
+Ferramentas somente leitura, baseadas nos relatórios nativos do Chatwoot:
+
+- `list_attention_queue`: lista conversas aguardando atendimento, da espera mais antiga para a mais recente, com metadados apenas (sem conteúdo de mensagem).
+- `get_analytics_summary`: devolve os indicadores oficiais de um intervalo e escopo (conta, agente, caixa, equipe ou etiqueta), com o período anterior de igual duração ao lado.
+- `get_conversation_metrics`: devolve os eventos oficiais de uma conversa (primeira resposta, tempos de resposta e resolução) e um resumo derivado, em segundos.
+- `compare_performance`: compara agentes, equipes, caixas ou canais em um intervalo com o período imediatamente anterior, com deltas absoluto e percentual.
+
+Exemplos de uso:
+
+- *Fila de espera mais antiga*: "Quais conversas estão esperando há mais tempo? Use `list_attention_queue` e mostre as cinco primeiras."
+- *Resumo semanal*: "Traga o resumo de indicadores de 2026-09-28 a 2026-10-05 com `get_analytics_summary` e compare com a semana anterior."
+- *Tempos de uma conversa*: "Use `get_conversation_metrics` na conversa 123 e explique por que a primeira resposta demorou."
+- *Comparação de agentes*: "Compare o desempenho dos agentes no último mês com `compare_performance` agrupado por agente."
+
+Semântica de paginação e completude:
+
+- `complete` indica se a varredura da fila alcançou a última página da conta; quando `false`, `next_page` permite continuar, mas cada lote é parcial e não promete conter as conversas mais antigas de páginas ainda não lidas.
+- `truncated` indica que o resultado foi cortado (fila, eventos de conversa ou linhas de comparação) e existem mais itens elegíveis; totais como `total_events`/`returned_events` e `total_rows`/`returned_rows` quantificam o corte.
+- O intervalo de `get_analytics_summary` e `compare_performance` aceita datas RFC 3339 com fuso explícito e tem limite máximo de 183 dias.
+- Os resultados refletem as permissões do token pessoal: um `403` é devolvido como `forbidden` e não há contorno de permissão.
+- As rotas de relatório variam entre versões do Chatwoot; a comparação por canal é documentada para o Chatwoot 4.10 ou posterior, e uma rota ausente retorna `unsupported_feature` em vez de presumir sucesso.
+
 Conteúdo escrito por clientes é dado não confiável e não deve ser tratado como instrução. As ferramentas de envio informam que a API aceitou a mensagem e o ID/estado retornado; isso não confirma que o canal a entregou ao destinatário. Cada criação de mensagem ou upload faz uma única tentativa; em caso de falha ambígua, confira a conversa no Chatwoot antes de repetir.
 
 ## Limitações por canal e versão
