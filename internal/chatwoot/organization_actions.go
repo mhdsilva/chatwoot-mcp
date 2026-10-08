@@ -12,10 +12,11 @@ type inboxWire struct {
 	ID          int64  `json:"id"`
 	Name        string `json:"name"`
 	ChannelType string `json:"channel_type"`
+	Medium      string `json:"medium"`
 }
 
 func (i inboxWire) toCore() core.Inbox {
-	return core.Inbox{ID: i.ID, Name: i.Name, ChannelType: i.ChannelType}
+	return core.Inbox{ID: i.ID, Name: i.Name, ChannelType: i.ChannelType, Medium: i.Medium}
 }
 
 type agentWire struct {

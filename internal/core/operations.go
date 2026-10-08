@@ -82,11 +82,13 @@ type ConversationCreateRequest struct {
 }
 
 // Inbox is the account-visible projection of a channel. ChannelType is the
-// Chatwoot channel class name, such as "Channel::Whatsapp".
+// Chatwoot channel class name, such as "Channel::Whatsapp". Medium
+// distinguishes a Twilio SMS inbox from a Twilio WhatsApp inbox.
 type Inbox struct {
 	ID          int64  `json:"id"`
 	Name        string `json:"name"`
 	ChannelType string `json:"channel_type"`
+	Medium      string `json:"medium,omitempty"`
 }
 
 // Agent is an account user that can be assigned conversations.

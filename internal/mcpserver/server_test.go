@@ -35,10 +35,13 @@ var wantToolNames = []string{
 	"list_agents",
 	"list_conversations",
 	"list_inboxes",
+	"list_message_templates",
 	"list_teams",
 	"remove_conversation_labels",
 	"search_contacts",
+	"send_attachment",
 	"send_reply",
+	"send_template",
 	"set_conversation_status",
 	"set_priority",
 }
@@ -52,12 +55,15 @@ var wantRequired = map[string][]string{
 	"list_agents":                nil,
 	"list_conversations":         nil,
 	"list_inboxes":               nil,
+	"list_message_templates":     {"inbox_id"},
 	"list_teams":                 nil,
 	"remove_conversation_labels": {"conversation_id", "labels"},
 	"get_conversation":           {"conversation_id"},
 	"search_contacts":            {"query"},
 	"get_contact_conversations":  {"contact_id"},
+	"send_attachment":            {"conversation_id", "path"},
 	"send_reply":                 {"conversation_id", "content"},
+	"send_template":              {"conversation_id", "template_name", "language", "category"},
 	"set_conversation_status":    {"conversation_id", "status"},
 	"set_priority":               {"conversation_id", "priority"},
 }
@@ -136,6 +142,24 @@ type fakeService struct {
 	labelsOp     string
 	labelsConv   int64
 	labelsValues []string
+
+	attachmentResult  service.AttachmentResult
+	attachmentErr     error
+	attachmentCalls   int
+	attachmentConv    int64
+	attachmentPath    string
+	attachmentContent string
+
+	templates      []core.Template
+	templatesErr   error
+	templatesCalls int
+	templatesInbox int64
+
+	templateResult service.SendResult
+	templateErr    error
+	templateCalls  int
+	templateConv   int64
+	templateInput  service.TemplateInput
 }
 
 func (f *fakeService) CheckConnection(context.Context) (core.Identity, error) {
@@ -239,6 +263,27 @@ func (f *fakeService) RemoveConversationLabels(_ context.Context, conversationID
 	f.labelsConv = conversationID
 	f.labelsValues = labels
 	return f.labelsResult, f.labelsErr
+}
+
+func (f *fakeService) SendAttachment(_ context.Context, conversationID int64, path, content string) (service.AttachmentResult, error) {
+	f.attachmentCalls++
+	f.attachmentConv = conversationID
+	f.attachmentPath = path
+	f.attachmentContent = content
+	return f.attachmentResult, f.attachmentErr
+}
+
+func (f *fakeService) ListMessageTemplates(_ context.Context, inboxID int64) ([]core.Template, error) {
+	f.templatesCalls++
+	f.templatesInbox = inboxID
+	return f.templates, f.templatesErr
+}
+
+func (f *fakeService) SendTemplate(_ context.Context, conversationID int64, in service.TemplateInput) (service.SendResult, error) {
+	f.templateCalls++
+	f.templateConv = conversationID
+	f.templateInput = in
+	return f.templateResult, f.templateErr
 }
 
 // fakeAPI is a minimal core.API used to exercise the real service bounding and
@@ -618,6 +663,110 @@ func TestAssignUnknownAgentErrorCarriesNotFoundCode(t *testing.T) {
 		t.Fatal("expected an error result")
 	}
 	if e := structuredError(t, res); e["code"] != string(service.CodeNotFound) {
+		t.Fatalf("error = %#v", e)
+	}
+}
+
+func TestSendAttachmentToolPassesPathAndContent(t *testing.T) {
+	fake := &fakeService{attachmentResult: service.AttachmentResult{
+		ConversationID: 42,
+		Message:        core.Message{ID: 900, Status: "sent"},
+		Filename:       "pic.png",
+		ContentType:    "image/png",
+		Size:           16,
+		Delivery:       service.DeliveryAcceptedByAPI,
+	}}
+	session, ctx := connectSession(t, fake)
+
+	res, err := session.CallTool(ctx, &mcp.CallToolParams{
+		Name:      "send_attachment",
+		Arguments: map[string]any{"conversation_id": 42, "path": "/tmp/pic.png", "content": "veja"},
+	})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("unexpected tool error: %s", resultText(res))
+	}
+	if fake.attachmentConv != 42 || fake.attachmentPath != "/tmp/pic.png" || fake.attachmentContent != "veja" {
+		t.Fatalf("service call = (%d, %q, %q)", fake.attachmentConv, fake.attachmentPath, fake.attachmentContent)
+	}
+	if data := structuredData(t, res); data["filename"] != "pic.png" {
+		t.Fatalf("data = %#v", data)
+	}
+}
+
+func TestListMessageTemplatesToolPassesInbox(t *testing.T) {
+	fake := &fakeService{templates: []core.Template{{Name: "welcome", Language: "en_US", Body: "Hello {{1}}"}}}
+	session, ctx := connectSession(t, fake)
+
+	res, err := session.CallTool(ctx, &mcp.CallToolParams{
+		Name:      "list_message_templates",
+		Arguments: map[string]any{"inbox_id": 5},
+	})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("unexpected tool error: %s", resultText(res))
+	}
+	if fake.templatesInbox != 5 {
+		t.Fatalf("inbox = %d, want 5", fake.templatesInbox)
+	}
+	data := structuredData(t, res)
+	templates, ok := data["templates"].([]any)
+	if !ok || len(templates) != 1 {
+		t.Fatalf("templates = %#v", data["templates"])
+	}
+}
+
+func TestSendTemplateToolPassesParameters(t *testing.T) {
+	fake := &fakeService{templateResult: service.SendResult{
+		ConversationID: 42,
+		Message:        core.Message{ID: 901, Status: "sent"},
+		Delivery:       service.DeliveryAcceptedByAPI,
+	}}
+	session, ctx := connectSession(t, fake)
+
+	res, err := session.CallTool(ctx, &mcp.CallToolParams{
+		Name: "send_template",
+		Arguments: map[string]any{
+			"conversation_id":  42,
+			"template_name":    "welcome",
+			"language":         "en_US",
+			"category":         "UTILITY",
+			"processed_params": map[string]any{"body": map[string]any{"1": "Ana"}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("unexpected tool error: %s", resultText(res))
+	}
+	if fake.templateConv != 42 || fake.templateInput.Name != "welcome" || fake.templateInput.Category != "UTILITY" {
+		t.Fatalf("service call = (%d, %#v)", fake.templateConv, fake.templateInput)
+	}
+	if fake.templateInput.ProcessedParams == nil {
+		t.Fatalf("processed params not forwarded: %#v", fake.templateInput)
+	}
+}
+
+func TestSendAttachmentChannelUnsupportedErrorCode(t *testing.T) {
+	fake := &fakeService{attachmentErr: &service.Error{Code: service.CodeChannelUnsupported, Message: "details"}}
+	session, ctx := connectSession(t, fake)
+
+	res, err := session.CallTool(ctx, &mcp.CallToolParams{
+		Name:      "send_attachment",
+		Arguments: map[string]any{"conversation_id": 42, "path": "/tmp/pic.png"},
+	})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	if !res.IsError {
+		t.Fatal("expected an error result")
+	}
+	if e := structuredError(t, res); e["code"] != string(service.CodeChannelUnsupported) {
 		t.Fatalf("error = %#v", e)
 	}
 }

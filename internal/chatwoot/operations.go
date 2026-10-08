@@ -25,7 +25,3 @@ func (c *Client) UpdateContact(context.Context, core.ContactUpdate) (core.Contac
 func (c *Client) CreateConversation(context.Context, core.ConversationCreateRequest) (core.Conversation, error) {
 	return core.Conversation{}, pending("conversation")
 }
-
-func (c *Client) ListTemplates(context.Context, int64) ([]core.Template, error) {
-	return nil, pending("message templates")
-}

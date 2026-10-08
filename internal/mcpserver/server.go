@@ -280,6 +280,7 @@ func newServerWithLogger(svc service.Service, logger *slog.Logger) *mcp.Server {
 
 	registerConversationTools(server, svc)
 	registerOrganizationTools(server, svc)
+	registerRichMessageTools(server, svc)
 
 	return server
 }
@@ -377,7 +378,13 @@ func fixedErrorMessage(code service.Code) string {
 	case service.CodeConversationMismatch:
 		return "the requested conversation id does not match the conversation returned by Chatwoot"
 	case service.CodeDeliveryUnknown:
-		return "reply delivery is unknown; check the conversation before retrying"
+		return "delivery is unknown; check the conversation before retrying"
+	case service.CodeChannelUnsupported:
+		return "the selected channel does not support this operation"
+	case service.CodeAttachmentTooLarge:
+		return "the attachment exceeds the size allowed for this channel"
+	case service.CodeTemplateNotFound:
+		return "the template is not among the approved templates for this inbox"
 	case service.CodeUnauthorized:
 		return "Chatwoot rejected the credentials; check the token configured in the panel"
 	case service.CodeForbidden:

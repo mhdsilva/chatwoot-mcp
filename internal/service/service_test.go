@@ -73,6 +73,15 @@ type fakeAPI struct {
 	setLabels     []string
 	setLabelsErr  error
 	setLabelsReqs []core.LabelsRequest
+
+	inbox      core.Inbox
+	inboxErr   error
+	inboxCalls int
+
+	templates      []core.Template
+	templatesErr   error
+	templatesCalls int
+	templatesInbox int64
 }
 
 var errAPINotUsed = errors.New("unexpected API call in service test")
@@ -145,8 +154,15 @@ func (f *fakeAPI) ListInboxes(context.Context) ([]core.Inbox, error) {
 	return f.inboxes, f.inboxesErr
 }
 
-func (f *fakeAPI) GetInbox(context.Context, int64) (core.Inbox, error) {
-	return core.Inbox{}, errAPINotUsed
+func (f *fakeAPI) GetInbox(_ context.Context, _ int64) (core.Inbox, error) {
+	f.inboxCalls++
+	return f.inbox, f.inboxErr
+}
+
+func (f *fakeAPI) ListTemplates(_ context.Context, inboxID int64) ([]core.Template, error) {
+	f.templatesCalls++
+	f.templatesInbox = inboxID
+	return f.templates, f.templatesErr
 }
 
 func (f *fakeAPI) ListAgents(context.Context) ([]core.Agent, error) {
@@ -167,10 +183,6 @@ func (f *fakeAPI) UpdateContact(context.Context, core.ContactUpdate) (core.Conta
 
 func (f *fakeAPI) CreateConversation(context.Context, core.ConversationCreateRequest) (core.Conversation, error) {
 	return core.Conversation{}, errAPINotUsed
-}
-
-func (f *fakeAPI) ListTemplates(context.Context, int64) ([]core.Template, error) {
-	return nil, errAPINotUsed
 }
 
 var _ core.API = (*fakeAPI)(nil)

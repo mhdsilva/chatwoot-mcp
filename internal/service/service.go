@@ -35,6 +35,9 @@ const (
 	CodeCannotReply          Code = "cannot_reply"
 	CodeConversationMismatch Code = "conversation_mismatch"
 	CodeDeliveryUnknown      Code = "delivery_unknown"
+	CodeChannelUnsupported   Code = "channel_unsupported"
+	CodeAttachmentTooLarge   Code = "attachment_too_large"
+	CodeTemplateNotFound     Code = "template_not_found"
 	CodeUnauthorized         Code = "unauthorized"
 	CodeForbidden            Code = "forbidden"
 	CodeNotFound             Code = "not_found"
@@ -116,6 +119,10 @@ type Service interface {
 	GetConversationLabels(context.Context, int64) (LabelsResult, error)
 	AddConversationLabels(context.Context, int64, []string) (LabelsResult, error)
 	RemoveConversationLabels(context.Context, int64, []string) (LabelsResult, error)
+
+	SendAttachment(context.Context, int64, string, string) (AttachmentResult, error)
+	ListMessageTemplates(context.Context, int64) ([]core.Template, error)
+	SendTemplate(context.Context, int64, TemplateInput) (SendResult, error)
 }
 
 // New builds a service backed by the given API client.
