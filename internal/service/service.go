@@ -104,6 +104,10 @@ type Service interface {
 	SearchContacts(context.Context, string, int) (core.Page[core.Contact], error)
 	GetContactConversations(context.Context, int64, int) (core.Page[core.Conversation], error)
 	SendReply(context.Context, int64, string) (SendResult, error)
+
+	AddPrivateNote(context.Context, int64, string) (NoteResult, error)
+	SetConversationStatus(context.Context, int64, string, string) (StatusResult, error)
+	SetPriority(context.Context, int64, string) (PriorityResult, error)
 }
 
 // New builds a service backed by the given API client.

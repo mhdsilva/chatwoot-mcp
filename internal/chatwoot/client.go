@@ -644,16 +644,14 @@ func nextConversationPage(page int, meta *conversationMeta, returned int) int {
 
 // GetConversation returns one conversation with its messages.
 func (c *Client) GetConversation(ctx context.Context, id int64) (core.Conversation, error) {
-	resource := "conversation " + strconv.FormatInt(id, 10)
-	var conv conversationWire
-	if err := c.call(ctx, http.MethodGet, c.accountPath()+"/conversations/"+strconv.FormatInt(id, 10), nil, nil, &conv, resource); err != nil {
+	result, err := c.getConversationMeta(ctx, id)
+	if err != nil {
 		return core.Conversation{}, err
 	}
 	messages, messageCount, messageCountExact, err := c.conversationMessages(ctx, id)
 	if err != nil {
 		return core.Conversation{}, err
 	}
-	result := conv.toCore()
 	result.Messages = make([]core.Message, len(messages))
 	for i, message := range messages {
 		result.Messages[i] = message.toCore()
@@ -661,6 +659,17 @@ func (c *Client) GetConversation(ctx context.Context, id int64) (core.Conversati
 	result.MessageCount = messageCount
 	result.MessageCountExact = messageCountExact
 	return result, nil
+}
+
+// getConversationMeta reads one conversation without its messages. It is used
+// for existence checks and to read back the state after a mutation.
+func (c *Client) getConversationMeta(ctx context.Context, id int64) (core.Conversation, error) {
+	resource := "conversation " + strconv.FormatInt(id, 10)
+	var conv conversationWire
+	if err := c.call(ctx, http.MethodGet, c.accountPath()+"/conversations/"+strconv.FormatInt(id, 10), nil, nil, &conv, resource); err != nil {
+		return core.Conversation{}, err
+	}
+	return conv.toCore(), nil
 }
 
 func (c *Client) conversationMessages(ctx context.Context, conversationID int64) ([]messageWire, int, bool, error) {

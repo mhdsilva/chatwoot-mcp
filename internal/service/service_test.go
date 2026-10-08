@@ -44,6 +44,14 @@ type fakeAPI struct {
 	createIDs     []int64
 	createTexts   []string
 	createReqs    []core.MessageRequest
+
+	setStatusConv core.Conversation
+	setStatusErr  error
+	setStatusReqs []core.StatusRequest
+
+	setPriorityConv core.Conversation
+	setPriorityErr  error
+	setPriorityReqs []core.PriorityRequest
 }
 
 var errAPINotUsed = errors.New("unexpected API call in service test")
@@ -87,12 +95,14 @@ func (f *fakeAPI) CreateMessage(_ context.Context, req core.MessageRequest) (cor
 	return f.createMessage, f.createErr
 }
 
-func (f *fakeAPI) SetStatus(context.Context, core.StatusRequest) (core.Conversation, error) {
-	return core.Conversation{}, errAPINotUsed
+func (f *fakeAPI) SetStatus(_ context.Context, req core.StatusRequest) (core.Conversation, error) {
+	f.setStatusReqs = append(f.setStatusReqs, req)
+	return f.setStatusConv, f.setStatusErr
 }
 
-func (f *fakeAPI) SetPriority(context.Context, core.PriorityRequest) (core.Conversation, error) {
-	return core.Conversation{}, errAPINotUsed
+func (f *fakeAPI) SetPriority(_ context.Context, req core.PriorityRequest) (core.Conversation, error) {
+	f.setPriorityReqs = append(f.setPriorityReqs, req)
+	return f.setPriorityConv, f.setPriorityErr
 }
 
 func (f *fakeAPI) Assign(context.Context, core.AssignmentRequest) (core.Conversation, error) {

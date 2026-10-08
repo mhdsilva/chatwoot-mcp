@@ -25,21 +25,27 @@ import (
 var _ func(context.Context, service.Service, io.Reader, io.Writer) error = Run
 
 var wantToolNames = []string{
+	"add_private_note",
 	"check_connection",
 	"get_contact_conversations",
 	"get_conversation",
 	"list_conversations",
 	"search_contacts",
 	"send_reply",
+	"set_conversation_status",
+	"set_priority",
 }
 
 var wantRequired = map[string][]string{
+	"add_private_note":          {"conversation_id", "content"},
 	"check_connection":          nil,
 	"list_conversations":        nil,
 	"get_conversation":          {"conversation_id"},
 	"search_contacts":           {"query"},
 	"get_contact_conversations": {"contact_id"},
 	"send_reply":                {"conversation_id", "content"},
+	"set_conversation_status":   {"conversation_id", "status"},
+	"set_priority":              {"conversation_id", "priority"},
 }
 
 type fakeService struct {
@@ -74,6 +80,25 @@ type fakeService struct {
 	sendCalls  int
 	sendIDs    []int64
 	sendTexts  []string
+
+	noteResult service.NoteResult
+	noteErr    error
+	noteCalls  int
+	noteID     int64
+	noteText   string
+
+	statusResult service.StatusResult
+	statusErr    error
+	statusCalls  int
+	statusID     int64
+	statusValue  string
+	statusSnooze string
+
+	priorityResult service.PriorityResult
+	priorityErr    error
+	priorityCalls  int
+	priorityID     int64
+	priorityValue  string
 }
 
 func (f *fakeService) CheckConnection(context.Context) (core.Identity, error) {
@@ -112,6 +137,28 @@ func (f *fakeService) SendReply(_ context.Context, id int64, content string) (se
 	f.sendIDs = append(f.sendIDs, id)
 	f.sendTexts = append(f.sendTexts, content)
 	return f.sendResult, f.sendErr
+}
+
+func (f *fakeService) AddPrivateNote(_ context.Context, id int64, content string) (service.NoteResult, error) {
+	f.noteCalls++
+	f.noteID = id
+	f.noteText = content
+	return f.noteResult, f.noteErr
+}
+
+func (f *fakeService) SetConversationStatus(_ context.Context, id int64, status, snoozedUntil string) (service.StatusResult, error) {
+	f.statusCalls++
+	f.statusID = id
+	f.statusValue = status
+	f.statusSnooze = snoozedUntil
+	return f.statusResult, f.statusErr
+}
+
+func (f *fakeService) SetPriority(_ context.Context, id int64, priority string) (service.PriorityResult, error) {
+	f.priorityCalls++
+	f.priorityID = id
+	f.priorityValue = priority
+	return f.priorityResult, f.priorityErr
 }
 
 // fakeAPI is a minimal core.API used to exercise the real service bounding and
@@ -251,7 +298,7 @@ func resultText(res *mcp.CallToolResult) string {
 	return b.String()
 }
 
-func TestRegistersExactlySixToolsWithRequiredFields(t *testing.T) {
+func TestRegistersAllToolsWithRequiredFields(t *testing.T) {
 	session, ctx := connectSession(t, &fakeService{})
 
 	res, err := session.ListTools(ctx, nil)
@@ -306,6 +353,102 @@ func TestRegistersExactlySixToolsWithRequiredFields(t *testing.T) {
 		if byName[name].Description == "" {
 			t.Fatalf("%s: missing description", name)
 		}
+	}
+}
+
+func TestAddPrivateNoteToolUsesChosenConversation(t *testing.T) {
+	fake := &fakeService{noteResult: service.NoteResult{
+		ConversationID: 42,
+		Message:        core.Message{ID: 700, Content: "nota", Private: true, Status: "sent"},
+		Private:        true,
+		Delivery:       service.DeliveryAcceptedByAPI,
+	}}
+	session, ctx := connectSession(t, fake)
+
+	res, err := session.CallTool(ctx, &mcp.CallToolParams{
+		Name:      "add_private_note",
+		Arguments: map[string]any{"conversation_id": 42, "content": "nota"},
+	})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("unexpected tool error: %s", resultText(res))
+	}
+	if fake.noteID != 42 || fake.noteText != "nota" {
+		t.Fatalf("service call = (%d, %q), want (42, nota)", fake.noteID, fake.noteText)
+	}
+	data := structuredData(t, res)
+	if data["conversation_id"] != float64(42) || data["private"] != true {
+		t.Fatalf("data = %#v", data)
+	}
+}
+
+func TestSetConversationStatusToolPassesArguments(t *testing.T) {
+	fake := &fakeService{statusResult: service.StatusResult{ConversationID: 42, Status: "snoozed", SnoozedUntil: "2030-07-21T17:32:28Z"}}
+	session, ctx := connectSession(t, fake)
+
+	res, err := session.CallTool(ctx, &mcp.CallToolParams{
+		Name:      "set_conversation_status",
+		Arguments: map[string]any{"conversation_id": 42, "status": "snoozed", "snoozed_until": "2030-07-21T17:32:28Z"},
+	})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("unexpected tool error: %s", resultText(res))
+	}
+	if fake.statusID != 42 || fake.statusValue != "snoozed" || fake.statusSnooze != "2030-07-21T17:32:28Z" {
+		t.Fatalf("service call = (%d, %q, %q)", fake.statusID, fake.statusValue, fake.statusSnooze)
+	}
+	data := structuredData(t, res)
+	if data["status"] != "snoozed" {
+		t.Fatalf("data = %#v", data)
+	}
+}
+
+func TestSetPriorityToolPassesArguments(t *testing.T) {
+	fake := &fakeService{priorityResult: service.PriorityResult{ConversationID: 42, Priority: "high"}}
+	session, ctx := connectSession(t, fake)
+
+	res, err := session.CallTool(ctx, &mcp.CallToolParams{
+		Name:      "set_priority",
+		Arguments: map[string]any{"conversation_id": 42, "priority": "high"},
+	})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("unexpected tool error: %s", resultText(res))
+	}
+	if fake.priorityID != 42 || fake.priorityValue != "high" {
+		t.Fatalf("service call = (%d, %q)", fake.priorityID, fake.priorityValue)
+	}
+	if data := structuredData(t, res); data["priority"] != "high" {
+		t.Fatalf("data = %#v", data)
+	}
+}
+
+func TestConversationToolValidationErrorCarriesCode(t *testing.T) {
+	fake := &fakeService{statusErr: &service.Error{Code: service.CodeInvalidInput, Message: "secret detail"}}
+	session, ctx := connectSession(t, fake)
+
+	res, err := session.CallTool(ctx, &mcp.CallToolParams{
+		Name:      "set_conversation_status",
+		Arguments: map[string]any{"conversation_id": 42, "status": "archived"},
+	})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	if !res.IsError {
+		t.Fatal("expected an error result")
+	}
+	e := structuredError(t, res)
+	if e["code"] != string(service.CodeInvalidInput) {
+		t.Fatalf("error = %#v", e)
+	}
+	if strings.Contains(resultText(res), "secret detail") {
+		t.Fatalf("upstream detail leaked: %s", resultText(res))
 	}
 }
 

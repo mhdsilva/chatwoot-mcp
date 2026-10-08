@@ -14,14 +14,6 @@ func pending(resource string) *Error {
 	return &Error{Kind: KindRequest, Resource: resource, Message: "operation is not implemented in this build"}
 }
 
-func (c *Client) SetStatus(context.Context, core.StatusRequest) (core.Conversation, error) {
-	return core.Conversation{}, pending("conversation status")
-}
-
-func (c *Client) SetPriority(context.Context, core.PriorityRequest) (core.Conversation, error) {
-	return core.Conversation{}, pending("conversation priority")
-}
-
 func (c *Client) Assign(context.Context, core.AssignmentRequest) (core.Conversation, error) {
 	return core.Conversation{}, pending("conversation assignment")
 }
