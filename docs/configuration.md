@@ -75,9 +75,12 @@ Mensagens de clientes são dados não confiáveis. A leitura de uma conversa nã
 
 Os endpoints usados são os da Application API documentada. `list_message_templates` depende de uma versão que exponha `GET /inboxes/{id}/message_templates`, e `send_template` depende do campo `template_params` em `POST /conversations/{id}/messages`. Em versões anteriores, a operação retorna erro em vez de presumir sucesso.
 
-As ferramentas de análise usam as rotas de relatório nativas (`/reports/summary`, `/summary_reports/...` e `reporting_events`), que variam entre versões e permissões do Chatwoot. A comparação por canal é documentada para o Chatwoot 4.10 ou posterior.
+As ferramentas de análise usam as rotas de relatório nativas (`/reports/summary`, `/summary_reports/...` e `reporting_events`), que variam entre versões, edições e permissões do Chatwoot. Nas versões consultadas, `reporting_events` por conversa é uma rota Enterprise. A comparação por canal é documentada para o Chatwoot 4.10 ou posterior e aceita até 180 dias, respeitando a restrição do endpoint.
+
+A compatibilidade automatizada não substitui um teste contra a instalação real: até agora, este MCP não foi validado ao vivo com uma conta Chatwoot. Confirme edição, versão e permissões do token; um `404` em `get_conversation_metrics` também pode significar conversa inexistente.
 
 ### Solução de problemas
 
 - `forbidden`: o token pessoal não tem permissão para a operação ou para a conta solicitada. Confirme no Chatwoot as permissões do usuário do token e o `account_id` configurado; o servidor não contorna permissões.
-- `unsupported_feature`: a rota de relatório ou de modelos não existe nesta versão da instalação Chatwoot. Verifique a versão da sua instalação e os endpoints que ela expõe; o servidor informa a ausência em vez de presumir sucesso.
+- `unsupported_feature`: uma rota de relatório/resumo não está disponível nesta edição ou versão. Verifique edição, versão e endpoints expostos; em escopos por agente/equipe/caixa, confirme também se o ID existe.
+- `not_found` em `get_conversation_metrics`: a conversa pode não existir, ou a rota Enterprise `reporting_events` pode não estar disponível nesta edição/versão.

@@ -15,7 +15,8 @@
 - New functionality is read-only and must not mutate Chatwoot or persist conversation data.
 - Use native Chatwoot report metrics; never replace `403`, unavailable routes, or missing fields with message-derived estimates.
 - `list_attention_queue` defaults to `status=open`, `limit=20`, `start_page=1`, caps `limit` at 50, and scans at most 10 upstream pages.
-- `get_analytics_summary` and `compare_performance` accept RFC 3339 timestamps with explicit offsets and reject intervals longer than 183 days.
+- `get_analytics_summary` and `compare_performance` accept RFC 3339 timestamps with explicit offsets and reject intervals longer than 183 days; `compare_performance` with `group_by=channel` rejects intervals longer than 180 days.
+- `compare_performance` defaults `limit` to 20 and rejects values above 50 before source access.
 - Summary scope defaults to `account` and accepts `account`, `agent`, `inbox`, `team`, or `label`; non-account scopes require a positive `scope_id`.
 - Comparison grouping is `agent`, `team`, `inbox`, or `channel` and uses the immediately preceding interval of equal duration.
 - Preserve missing numeric data as missing; never coerce it to zero. Omit percentage deltas when the previous value is absent or zero.

@@ -28,8 +28,8 @@ const (
 
 // ReportRange bounds a report window in absolute time.
 type ReportRange struct {
-	Since time.Time
-	Until time.Time
+	Since time.Time `json:"since"`
+	Until time.Time `json:"until"`
 }
 
 // ReportSummaryRequest asks for the current/previous metric summary of one scope.
@@ -55,9 +55,9 @@ type ReportMetrics struct {
 	OpenCount               *int64   `json:"open_count"`
 	PendingCount            *int64   `json:"pending_count"`
 	SnoozedCount            *int64   `json:"snoozed_count"`
-	AvgFirstResponseSeconds *float64 `json:"avg_first_response_time"`
-	AvgResolutionSeconds    *float64 `json:"avg_resolution_time"`
-	AvgReplySeconds         *float64 `json:"avg_reply_time"`
+	AvgFirstResponseSeconds *float64 `json:"avg_first_response_seconds"`
+	AvgResolutionSeconds    *float64 `json:"avg_resolution_seconds"`
+	AvgReplySeconds         *float64 `json:"avg_reply_seconds"`
 }
 
 // ReportSummary pairs the current window metrics with the previous window.

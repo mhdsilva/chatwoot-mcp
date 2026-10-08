@@ -249,7 +249,10 @@ Entrada:
 
 - as regras de data são iguais às do resumo;
 - `group_by` aceita `agent`, `team`, `inbox` ou `channel`;
-- `limit` usa 20 por padrão e no máximo 50.
+- `limit` usa 20 por padrão e aceita valores de 1 a 50; valor acima de 50 é
+  rejeitado antes de consultar a API;
+- para `group_by=channel`, o intervalo máximo é 180 dias, devido ao limite mais
+  restritivo da rota nativa do Chatwoot.
 
 O período anterior termina em `since` e tem a mesma duração do período atual.
 A saída ecoa os dois intervalos e contém linhas ordenadas por identificador

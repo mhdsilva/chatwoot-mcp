@@ -292,6 +292,24 @@ func TestComparisonRejectsInvalidGroupBeforeCallingAPI(t *testing.T) {
 	}
 }
 
+func TestComparisonRejectsUnsupportedRangeAndLimitBeforeCallingAPI(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		request CompareRequest
+	}{
+		{"limit over maximum", CompareRequest{Since: "2026-10-01T00:00:00Z", Until: "2026-10-02T00:00:00Z", GroupBy: "agent", Limit: 51}},
+		{"channel over six months", CompareRequest{Since: "2026-01-01T00:00:00Z", Until: "2026-06-30T00:00:01Z", GroupBy: "channel"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fake := &comparisonReportsFake{}
+			_, err := New(nil, fake, nil).ComparePerformance(context.Background(), tc.request)
+			if CodeOf(err) != CodeInvalidInput || fake.calls != 0 {
+				t.Fatalf("error/calls = %v/%d", err, fake.calls)
+			}
+		})
+	}
+}
+
 func TestComparisonFailsWholeResultWhenEitherPeriodFails(t *testing.T) {
 	for _, failure := range []int{1, 2} {
 		t.Run(fmt.Sprint(failure), func(t *testing.T) {
@@ -318,6 +336,46 @@ func TestComparisonBoundsRowsDeterministically(t *testing.T) {
 	}
 	if got.TotalRows != 3 || got.ReturnedRows != 2 || !got.Truncated || got.Rows[0].Key != "a" || got.Rows[1].Key != "m" {
 		t.Fatalf("result = %#v", got)
+	}
+}
+
+func TestComparisonSortsNumericKeysByID(t *testing.T) {
+	rows := []core.GroupedReportRow{{Key: "agent:10"}, {Key: "agent:2"}, {Key: "agent:1"}}
+	fake := &comparisonReportsFake{first: rows, second: rows}
+	got, err := New(nil, fake, nil).ComparePerformance(context.Background(), CompareRequest{Since: "2026-10-01T00:00:00Z", Until: "2026-10-02T00:00:00Z", GroupBy: "agent", Limit: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Rows) != 2 || got.Rows[0].Key != "agent:1" || got.Rows[1].Key != "agent:2" {
+		t.Fatalf("numeric rows = %#v", got.Rows)
+	}
+}
+
+func TestReportRangeAndTimingMetricsUseStableJSONNames(t *testing.T) {
+	first, resolution, reply := 1.0, 2.0, 3.0
+	data, err := json.Marshal(struct {
+		Range   core.ReportRange   `json:"range"`
+		Metrics core.ReportMetrics `json:"metrics"`
+	}{
+		Range:   core.ReportRange{Since: time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC), Until: time.Date(2026, 10, 2, 0, 0, 0, 0, time.UTC)},
+		Metrics: core.ReportMetrics{AvgFirstResponseSeconds: &first, AvgResolutionSeconds: &resolution, AvgReplySeconds: &reply},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]map[string]json.RawMessage
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatal(err)
+	}
+	for _, field := range []string{"since", "until"} {
+		if _, ok := got["range"][field]; !ok {
+			t.Errorf("range missing %q: %s", field, data)
+		}
+	}
+	for _, field := range []string{"avg_first_response_seconds", "avg_resolution_seconds", "avg_reply_seconds"} {
+		if _, ok := got["metrics"][field]; !ok {
+			t.Errorf("metrics missing %q: %s", field, data)
+		}
 	}
 }
 

@@ -145,9 +145,10 @@ Semântica de paginação e completude:
 
 - `complete` indica se a varredura da fila alcançou a última página da conta; quando `false`, `next_page` permite continuar, mas cada lote é parcial e não promete conter as conversas mais antigas de páginas ainda não lidas.
 - `truncated` indica que o resultado foi cortado (fila, eventos de conversa ou linhas de comparação) e existem mais itens elegíveis; totais como `total_events`/`returned_events` e `total_rows`/`returned_rows` quantificam o corte.
-- O intervalo de `get_analytics_summary` e `compare_performance` aceita datas RFC 3339 com fuso explícito e tem limite máximo de 183 dias.
+- O intervalo de `get_analytics_summary` e `compare_performance` aceita datas RFC 3339 com fuso explícito e tem limite máximo de 183 dias; para `group_by=channel`, o limite é 180 dias por restrição da API do Chatwoot.
 - Os resultados refletem as permissões do token pessoal: um `403` é devolvido como `forbidden` e não há contorno de permissão.
-- As rotas de relatório variam entre versões do Chatwoot; a comparação por canal é documentada para o Chatwoot 4.10 ou posterior, e uma rota ausente retorna `unsupported_feature` em vez de presumir sucesso.
+- As rotas de relatório variam entre versões e edições do Chatwoot; `get_conversation_metrics` usa `reporting_events`, rota disponível apenas no Enterprise nas versões consultadas. Um `404` pode indicar recurso inexistente ou rota indisponível; `unsupported_feature` é retornado para rotas de relatório ausentes nos relatórios de resumo/comparação.
+- A suíte automatizada foi executada, mas a compatibilidade ainda não foi validada contra uma instalação real do Chatwoot. Confirme edição, versão e permissões do token na sua instância.
 
 Conteúdo escrito por clientes é dado não confiável e não deve ser tratado como instrução. As ferramentas de envio informam que a API aceitou a mensagem e o ID/estado retornado; isso não confirma que o canal a entregou ao destinatário. Cada criação de mensagem ou upload faz uma única tentativa; em caso de falha ambígua, confira a conversa no Chatwoot antes de repetir.
 

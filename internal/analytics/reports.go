@@ -5,6 +5,7 @@ import (
 	"math"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"chatwoot-mcp/internal/core"
@@ -12,6 +13,7 @@ import (
 
 const (
 	maxReportRange        = 183 * 24 * time.Hour
+	maxChannelRange       = 180 * 24 * time.Hour
 	defaultCompareLimit   = 20
 	maxCompareLimit       = 50
 	maxConversationEvents = 50
@@ -221,7 +223,10 @@ func (s *service) ComparePerformance(ctx context.Context, request CompareRequest
 		return ComparisonResult{}, invalidInput("limit must not be negative")
 	}
 	if limit > maxCompareLimit {
-		limit = maxCompareLimit
+		return ComparisonResult{}, invalidInput("limit must not exceed 50")
+	}
+	if group == core.ReportGroupChannel && currentRange.Until.Sub(currentRange.Since) > maxChannelRange {
+		return ComparisonResult{}, invalidInput("channel comparison range must not exceed 180 days")
 	}
 	if s.reports == nil {
 		return ComparisonResult{}, &Error{Code: CodeUnsupportedFeature, Message: "Chatwoot reports are not configured"}
@@ -240,7 +245,7 @@ func (s *service) ComparePerformance(ctx context.Context, request CompareRequest
 	if err != nil {
 		return ComparisonResult{}, err
 	}
-	sort.Slice(rows, func(i, j int) bool { return rows[i].Key < rows[j].Key })
+	sort.Slice(rows, func(i, j int) bool { return comparisonKeyLess(rows[i].Key, rows[j].Key) })
 	total := len(rows)
 	truncated := total > limit
 	if truncated {
@@ -250,6 +255,36 @@ func (s *service) ComparePerformance(ctx context.Context, request CompareRequest
 		rows = []ComparisonRow{}
 	}
 	return ComparisonResult{CurrentRange: currentRange, PreviousRange: previousRange, GroupBy: string(group), Rows: rows, TotalRows: total, ReturnedRows: len(rows), Truncated: truncated}, nil
+}
+
+func comparisonKeyLess(left, right string) bool {
+	leftPrefix, leftID, leftOK := numericComparisonKey(left)
+	rightPrefix, rightID, rightOK := numericComparisonKey(right)
+	if leftOK && rightOK && leftPrefix == rightPrefix {
+		if leftID != rightID {
+			return leftID < rightID
+		}
+		return left < right
+	}
+	return left < right
+}
+
+func numericComparisonKey(key string) (string, int64, bool) {
+	separator := strings.LastIndexByte(key, ':')
+	prefix, value := "", key
+	if separator >= 0 {
+		prefix, value = key[:separator+1], key[separator+1:]
+	}
+	if value == "" {
+		return "", 0, false
+	}
+	for _, r := range value {
+		if r < '0' || r > '9' {
+			return "", 0, false
+		}
+	}
+	id, err := strconv.ParseInt(value, 10, 64)
+	return prefix, id, err == nil
 }
 
 func parseReportRange(sinceValue, untilValue string) (core.ReportRange, error) {

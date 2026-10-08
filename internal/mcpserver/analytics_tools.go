@@ -32,8 +32,8 @@ type getConversationMetricsInput struct {
 
 type comparePerformanceInput struct {
 	Since   string `json:"since" jsonschema:"RFC 3339 start of the range with an explicit offset"`
-	Until   string `json:"until" jsonschema:"RFC 3339 end of the range with an explicit offset; must be after since; the range is at most 183 days"`
-	GroupBy string `json:"group_by" jsonschema:"grouping dimension: agent, team, inbox or channel"`
+	Until   string `json:"until" jsonschema:"RFC 3339 end of the range with an explicit offset; must be after since; at most 183 days, or 180 days for channel"`
+	GroupBy string `json:"group_by" jsonschema:"grouping dimension: agent, team, inbox or channel; channel supports at most 180 days"`
 	Limit   int    `json:"limit,omitempty" jsonschema:"row limit; defaults to 20, at most 50"`
 }
 

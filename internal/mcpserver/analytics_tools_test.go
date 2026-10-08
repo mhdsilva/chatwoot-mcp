@@ -225,7 +225,7 @@ func TestGetAnalyticsSummaryToolPassesRangeAndScope(t *testing.T) {
 		t.Fatalf("scope not preserved: %#v", data)
 	}
 	current, _ := data["current"].(map[string]any)
-	if current["conversations_count"] != float64(120) || current["avg_first_response_time"] != float64(92.4) {
+	if current["conversations_count"] != float64(120) || current["avg_first_response_seconds"] != float64(92.4) {
 		t.Fatalf("current metrics not preserved: %#v", current)
 	}
 	if value, ok := current["resolutions_count"]; ok && value != nil {
