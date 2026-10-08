@@ -168,7 +168,15 @@ func TestInitialUnconfiguredStateAndReadEndpoints(t *testing.T) {
 		t.Fatalf("unexpected initial status: %#v", status)
 	}
 	w = request(t, h, "GET", "/api/tools", "", "")
-	for _, name := range []string{"check_connection", "list_conversations", "get_conversation", "search_contacts", "get_contact_conversations", "send_reply"} {
+	for _, name := range []string{
+		"check_connection", "list_conversations", "get_conversation", "search_contacts",
+		"get_contact_conversations", "send_reply",
+		"add_private_note", "set_conversation_status", "set_priority",
+		"list_inboxes", "list_agents", "list_teams", "assign_conversation",
+		"get_conversation_labels", "add_conversation_labels", "remove_conversation_labels",
+		"send_attachment", "list_message_templates", "send_template",
+		"get_contact", "update_contact", "create_conversation",
+	} {
 		if !strings.Contains(w.Body.String(), name) {
 			t.Errorf("tools missing %s", name)
 		}

@@ -41,7 +41,7 @@ Se a credencial tiver sido exposta, revogue-a no Chatwoot imediatamente e repita
 
 Uma configuração representa uma instalação Chatwoot e um `account_id`. O token determina as contas, caixas de entrada e operações permitidas. Todas as caixas de entrada visíveis ao usuário podem aparecer, mas a capacidade de responder depende do canal e do estado da conversa.
 
-`send_reply` faz uma única tentativa de criação da mensagem. Se houver timeout ou falha de rede sem confirmação, o resultado pode ser incerto: confira a conversa no Chatwoot antes de repetir para evitar duplicidade. Uma resposta de sucesso informa aceitação pela API e os dados da mensagem retornados pelo Chatwoot, não a entrega ao cliente.
+`send_reply`, `send_attachment`, `send_template` e `create_conversation` fazem uma única tentativa. Se houver timeout ou falha de rede sem confirmação, o resultado pode ser incerto: confira a conversa no Chatwoot antes de repetir para evitar duplicidade. Uma resposta de sucesso informa aceitação pela API e os dados retornados pelo Chatwoot, não a entrega ao cliente.
 
 ## Clientes MCP
 
@@ -49,15 +49,25 @@ O transporte local usa `stdio`. O cliente deve iniciar o executável com o argum
 
 ## Ferramentas disponíveis
 
-A primeira versão prevê seis ferramentas MCP:
+O servidor MCP expõe vinte e duas ferramentas, agrupadas por finalidade:
 
-| Ferramenta | Uso |
+| Grupo | Ferramentas |
 |---|---|
-| `check_connection` | Conferir conexão e identidade da conta/usuário. |
-| `list_conversations` | Listar conversas com paginação e filtros suportados. |
-| `get_conversation` | Ler uma conversa e um número limitado de mensagens recentes. |
-| `search_contacts` | Localizar contatos pelos campos de busca disponíveis. |
-| `get_contact_conversations` | Listar conversas de um contato para desambiguar a seleção. |
-| `send_reply` | Enviar texto à conversa selecionada, após conferir se aceita resposta. |
+| Consulta e resposta | `check_connection`, `list_conversations`, `get_conversation`, `search_contacts`, `get_contact_conversations`, `send_reply` |
+| Conversa | `add_private_note`, `set_conversation_status`, `set_priority` |
+| Organização e roteamento | `list_inboxes`, `list_agents`, `list_teams`, `assign_conversation`, `get_conversation_labels`, `add_conversation_labels`, `remove_conversation_labels` |
+| Mensagens ricas | `send_attachment`, `list_message_templates`, `send_template` |
+| Contatos e novas conversas | `get_contact`, `update_contact`, `create_conversation` |
 
-Mensagens de clientes são dados não confiáveis. A leitura de uma conversa não envia mensagens; o envio exige uma chamada explícita de `send_reply` com ID positivo da conversa e texto não vazio.
+Mensagens de clientes são dados não confiáveis. A leitura de uma conversa não envia mensagens nem altera estado; cada mutação exige uma chamada explícita com ID positivo e devolve o estado informado pelo Chatwoot.
+
+### Restrições por canal
+
+- `send_reply` e `send_attachment` respeitam `can_reply`, que reflete a janela de mensagens do canal (por exemplo, 24 horas no WhatsApp). Fora da janela, use um modelo aprovado com `send_template`.
+- `send_attachment` aceita apenas caminho absoluto de arquivo local; URL remota, caminho relativo e diretório são recusados. Tamanho e MIME são verificados antes do upload e cada canal tem seus limites.
+- `list_message_templates` e `send_template` funcionam somente em caixas do WhatsApp (nativo ou Twilio WhatsApp). Em outros canais retornam um erro específico.
+- `create_conversation` só funciona nos canais que permitem iniciação (Website, API, Email e SMS/Phone). Nos canais em que o contato precisa escrever primeiro, retorna erro específico.
+
+### Dependências de versão
+
+Os endpoints usados são os da Application API documentada. `list_message_templates` depende de uma versão que exponha `GET /inboxes/{id}/message_templates`, e `send_template` depende do campo `template_params` em `POST /conversations/{id}/messages`. Em versões anteriores, a operação retorna erro em vez de presumir sucesso.
