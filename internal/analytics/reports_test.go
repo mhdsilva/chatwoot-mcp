@@ -2,7 +2,9 @@ package analytics
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -124,6 +126,20 @@ func TestConversationMetricsAggregateAllAndReturnNewest50(t *testing.T) {
 	}
 }
 
+func TestConversationMetricsKeepsNewest50InDescendingUpstreamOrder(t *testing.T) {
+	fake := &reportsFake{}
+	for i := 59; i >= 0; i-- {
+		fake.events = append(fake.events, core.ReportingEvent{ID: int64(i + 1), EventEndTime: time.Unix(int64(i), 0).UTC()})
+	}
+	got, err := New(nil, fake, nil).GetConversationMetrics(context.Background(), 123)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.Truncated || len(got.Events) != 50 || got.Events[0].ID != 60 || got.Events[49].ID != 11 {
+		t.Fatalf("retained events = %d..%d truncated=%v", got.Events[0].ID, got.Events[49].ID, got.Truncated)
+	}
+}
+
 func TestConversationMetricsEmptyAndInvalidID(t *testing.T) {
 	fake := &reportsFake{}
 	service := New(nil, fake, nil)
@@ -141,7 +157,7 @@ func TestConversationMetricsEmptyAndInvalidID(t *testing.T) {
 }
 
 func TestConversationMetricsPreservesMissingValues(t *testing.T) {
-	fake := &reportsFake{events: []core.ReportingEvent{{Name: "first_response"}, {Name: "reply_time"}, {Name: "reply_time", ValueSeconds: ptrFloat(10)}}}
+	fake := &reportsFake{events: []core.ReportingEvent{{Name: "first_response"}, {Name: "first_response", ValueSeconds: ptrFloat(20), BusinessValueSeconds: ptrFloat(10)}, {Name: "reply_time"}, {Name: "reply_time", ValueSeconds: ptrFloat(10)}}}
 	got, err := New(nil, fake, nil).GetConversationMetrics(context.Background(), 9)
 	if err != nil {
 		t.Fatal(err)
@@ -151,9 +167,27 @@ func TestConversationMetricsPreservesMissingValues(t *testing.T) {
 	}
 }
 
+func TestReportingEventUsesSecondsOutputTags(t *testing.T) {
+	value := 12.0
+	data, err := json.Marshal(core.ReportingEvent{ValueSeconds: &value, BusinessValueSeconds: &value})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"value_seconds":12`) || !strings.Contains(string(data), `"business_value_seconds":12`) {
+		t.Fatalf("event JSON = %s", data)
+	}
+}
+
 func TestComparisonUsesPreviousEqualElapsedRangeAcrossDST(t *testing.T) {
-	since := time.Date(2026, 11, 1, 1, 30, 0, 0, time.FixedZone("-04", -4*60*60))
-	until := since.Add(25 * time.Hour)
+	location, err := time.LoadLocation("America/New_York")
+	if err != nil {
+		t.Skipf("timezone database unavailable: %v", err)
+	}
+	since := time.Date(2026, 10, 31, 12, 0, 0, 0, location)
+	until := time.Date(2026, 11, 1, 12, 0, 0, 0, location)
+	if until.Sub(since) != 25*time.Hour {
+		t.Fatalf("test range duration = %s, want 25h across DST", until.Sub(since))
+	}
 	fake := &reportsFake{groups: map[core.ReportGroup][]core.GroupedReportRow{core.ReportGroupAgent: {}}}
 	service := New(nil, fake, nil)
 	got, err := service.ComparePerformance(context.Background(), CompareRequest{Since: since.Format(time.RFC3339), Until: until.Format(time.RFC3339), GroupBy: "agent"})
@@ -174,12 +208,7 @@ func TestComparisonJoinsRowsByStableKey(t *testing.T) {
 	current := int64(8)
 	prevTime := 10.0
 	currTime := 6.0
-	fake := &reportsFake{groups: map[core.ReportGroup][]core.GroupedReportRow{
-		core.ReportGroupAgent: {{Key: "agent:2", ID: 2, Name: "New", Metrics: core.ReportMetrics{ConversationsCount: &current, AvgFirstResponseSeconds: &currTime}}},
-	}}
-	fake.groupErrs = []error{nil}
-	// The fake returns the same group for both calls; replace its rows after call one.
-	mutating := &comparisonReportsFake{first: fake.groups[core.ReportGroupAgent], second: []core.GroupedReportRow{{Key: "agent:2", ID: 2, Name: "Old", Metrics: core.ReportMetrics{ConversationsCount: &previous, AvgFirstResponseSeconds: &prevTime}}}}
+	mutating := &comparisonReportsFake{first: []core.GroupedReportRow{{Key: "agent:2", ID: 2, Name: "New", Metrics: core.ReportMetrics{ConversationsCount: &current, AvgFirstResponseSeconds: &currTime}}}, second: []core.GroupedReportRow{{Key: "agent:2", ID: 2, Name: "Old", Metrics: core.ReportMetrics{ConversationsCount: &previous, AvgFirstResponseSeconds: &prevTime}}}}
 	service := New(nil, mutating, nil)
 	got, err := service.ComparePerformance(context.Background(), CompareRequest{Since: "2026-10-01T00:00:00Z", Until: "2026-10-02T00:00:00Z", GroupBy: "agent"})
 	if err != nil {
@@ -221,6 +250,9 @@ func TestComparisonOmitsPercentWhenPreviousIsZeroOrMissing(t *testing.T) {
 	got, err := New(nil, fake, nil).ComparePerformance(context.Background(), CompareRequest{Since: "2026-10-01T00:00:00Z", Until: "2026-10-02T00:00:00Z", GroupBy: "agent"})
 	if err != nil {
 		t.Fatal(err)
+	}
+	if len(got.Rows) != 2 {
+		t.Fatalf("rows = %d, want 2", len(got.Rows))
 	}
 	if got.Rows[0].Key != "a" || got.Rows[0].Delta.ConversationsCount == nil || got.Rows[0].Delta.ConversationsCount.Percent != nil {
 		t.Fatalf("zero-previous delta = %#v", got.Rows[0])

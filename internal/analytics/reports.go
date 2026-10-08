@@ -140,10 +140,12 @@ func (s *service) GetConversationMetrics(ctx context.Context, id int64) (Convers
 	summary := ConversationMetricsSummary{}
 	replyTotal := 0.0
 	replyValueCount := 0
+	seenFirstResponse := false
 	for _, event := range events {
 		switch event.Name {
 		case "first_response":
-			if summary.FirstResponseSeconds == nil {
+			if !seenFirstResponse {
+				seenFirstResponse = true
 				summary.FirstResponseSeconds = event.ValueSeconds
 				summary.FirstResponseBusinessSeconds = event.BusinessValueSeconds
 			}
@@ -162,15 +164,42 @@ func (s *service) GetConversationMetrics(ctx context.Context, id int64) (Convers
 		average := replyTotal / float64(replyValueCount)
 		summary.AvgReplySeconds = &average
 	}
-	retained := events
-	truncated := len(events) > maxConversationEvents
-	if truncated {
-		retained = events[len(events)-maxConversationEvents:]
-	}
+	retained, truncated := newestEvents(events, maxConversationEvents)
 	if retained == nil {
 		retained = []core.ReportingEvent{}
 	}
 	return ConversationMetricsResult{ConversationID: id, Summary: summary, Events: retained, TotalEvents: len(events), ReturnedEvents: len(retained), Truncated: truncated}, nil
+}
+
+// newestEvents selects by event end time while retaining the upstream order
+// among the selected events. The source may return either chronological or
+// reverse-chronological order.
+func newestEvents(events []core.ReportingEvent, limit int) ([]core.ReportingEvent, bool) {
+	if len(events) <= limit {
+		return events, false
+	}
+	indices := make([]int, len(events))
+	for i := range indices {
+		indices[i] = i
+	}
+	sort.Slice(indices, func(i, j int) bool {
+		left, right := events[indices[i]].EventEndTime, events[indices[j]].EventEndTime
+		if left.Equal(right) {
+			return indices[i] > indices[j]
+		}
+		return left.After(right)
+	})
+	selected := make(map[int]struct{}, limit)
+	for _, index := range indices[:limit] {
+		selected[index] = struct{}{}
+	}
+	result := make([]core.ReportingEvent, 0, limit)
+	for i, event := range events {
+		if _, ok := selected[i]; ok {
+			result = append(result, event)
+		}
+	}
+	return result, true
 }
 
 func (s *service) ComparePerformance(ctx context.Context, request CompareRequest) (ComparisonResult, error) {
@@ -289,7 +318,7 @@ func indexGroupedRows(target map[string]core.GroupedReportRow, rows []core.Group
 			key = strconv.FormatInt(row.ID, 10)
 		}
 		if key == "" {
-			return invalidInput("grouped report row has no stable key or ID")
+			return &Error{Code: CodeInvalidResponse, Message: "grouped report row has no stable key or ID"}
 		}
 		row.Key = key
 		target[key] = row
@@ -299,9 +328,16 @@ func indexGroupedRows(target map[string]core.GroupedReportRow, rows []core.Group
 
 func metricDeltas(current, previous core.ReportMetrics) MetricDeltas {
 	return MetricDeltas{
-		ConversationsCount: deltaInt(current.ConversationsCount, previous.ConversationsCount), IncomingMessagesCount: deltaInt(current.IncomingMessagesCount, previous.IncomingMessagesCount), OutgoingMessagesCount: deltaInt(current.OutgoingMessagesCount, previous.OutgoingMessagesCount),
-		ResolutionsCount: deltaInt(current.ResolutionsCount, previous.ResolutionsCount), OpenCount: deltaInt(current.OpenCount, previous.OpenCount), PendingCount: deltaInt(current.PendingCount, previous.PendingCount), SnoozedCount: deltaInt(current.SnoozedCount, previous.SnoozedCount),
-		AvgFirstResponseSeconds: deltaFloat(current.AvgFirstResponseSeconds, previous.AvgFirstResponseSeconds), AvgResolutionSeconds: deltaFloat(current.AvgResolutionSeconds, previous.AvgResolutionSeconds), AvgReplySeconds: deltaFloat(current.AvgReplySeconds, previous.AvgReplySeconds),
+		ConversationsCount:      deltaInt(current.ConversationsCount, previous.ConversationsCount),
+		IncomingMessagesCount:   deltaInt(current.IncomingMessagesCount, previous.IncomingMessagesCount),
+		OutgoingMessagesCount:   deltaInt(current.OutgoingMessagesCount, previous.OutgoingMessagesCount),
+		ResolutionsCount:        deltaInt(current.ResolutionsCount, previous.ResolutionsCount),
+		OpenCount:               deltaInt(current.OpenCount, previous.OpenCount),
+		PendingCount:            deltaInt(current.PendingCount, previous.PendingCount),
+		SnoozedCount:            deltaInt(current.SnoozedCount, previous.SnoozedCount),
+		AvgFirstResponseSeconds: deltaFloat(current.AvgFirstResponseSeconds, previous.AvgFirstResponseSeconds),
+		AvgResolutionSeconds:    deltaFloat(current.AvgResolutionSeconds, previous.AvgResolutionSeconds),
+		AvgReplySeconds:         deltaFloat(current.AvgReplySeconds, previous.AvgReplySeconds),
 	}
 }
 
