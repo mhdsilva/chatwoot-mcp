@@ -52,6 +52,27 @@ type fakeAPI struct {
 	setPriorityConv core.Conversation
 	setPriorityErr  error
 	setPriorityReqs []core.PriorityRequest
+
+	inboxes    []core.Inbox
+	inboxesErr error
+
+	agents    []core.Agent
+	agentsErr error
+
+	teams    []core.Team
+	teamsErr error
+
+	assignConv core.Conversation
+	assignErr  error
+	assignReqs []core.AssignmentRequest
+
+	getLabels      []string
+	getLabelsErr   error
+	getLabelsCalls int
+
+	setLabels     []string
+	setLabelsErr  error
+	setLabelsReqs []core.LabelsRequest
 }
 
 var errAPINotUsed = errors.New("unexpected API call in service test")
@@ -105,20 +126,23 @@ func (f *fakeAPI) SetPriority(_ context.Context, req core.PriorityRequest) (core
 	return f.setPriorityConv, f.setPriorityErr
 }
 
-func (f *fakeAPI) Assign(context.Context, core.AssignmentRequest) (core.Conversation, error) {
-	return core.Conversation{}, errAPINotUsed
+func (f *fakeAPI) Assign(_ context.Context, req core.AssignmentRequest) (core.Conversation, error) {
+	f.assignReqs = append(f.assignReqs, req)
+	return f.assignConv, f.assignErr
 }
 
-func (f *fakeAPI) GetLabels(context.Context, int64) ([]string, error) {
-	return nil, errAPINotUsed
+func (f *fakeAPI) GetLabels(_ context.Context, _ int64) ([]string, error) {
+	f.getLabelsCalls++
+	return f.getLabels, f.getLabelsErr
 }
 
-func (f *fakeAPI) SetLabels(context.Context, core.LabelsRequest) ([]string, error) {
-	return nil, errAPINotUsed
+func (f *fakeAPI) SetLabels(_ context.Context, req core.LabelsRequest) ([]string, error) {
+	f.setLabelsReqs = append(f.setLabelsReqs, req)
+	return f.setLabels, f.setLabelsErr
 }
 
 func (f *fakeAPI) ListInboxes(context.Context) ([]core.Inbox, error) {
-	return nil, errAPINotUsed
+	return f.inboxes, f.inboxesErr
 }
 
 func (f *fakeAPI) GetInbox(context.Context, int64) (core.Inbox, error) {
@@ -126,11 +150,11 @@ func (f *fakeAPI) GetInbox(context.Context, int64) (core.Inbox, error) {
 }
 
 func (f *fakeAPI) ListAgents(context.Context) ([]core.Agent, error) {
-	return nil, errAPINotUsed
+	return f.agents, f.agentsErr
 }
 
 func (f *fakeAPI) ListTeams(context.Context) ([]core.Team, error) {
-	return nil, errAPINotUsed
+	return f.teams, f.teamsErr
 }
 
 func (f *fakeAPI) GetContact(context.Context, int64) (core.ContactDetail, error) {

@@ -108,6 +108,14 @@ type Service interface {
 	AddPrivateNote(context.Context, int64, string) (NoteResult, error)
 	SetConversationStatus(context.Context, int64, string, string) (StatusResult, error)
 	SetPriority(context.Context, int64, string) (PriorityResult, error)
+
+	ListInboxes(context.Context) ([]core.Inbox, error)
+	ListAgents(context.Context) ([]core.Agent, error)
+	ListTeams(context.Context) ([]core.Team, error)
+	AssignConversation(context.Context, int64, int64, int64) (AssignmentResult, error)
+	GetConversationLabels(context.Context, int64) (LabelsResult, error)
+	AddConversationLabels(context.Context, int64, []string) (LabelsResult, error)
+	RemoveConversationLabels(context.Context, int64, []string) (LabelsResult, error)
 }
 
 // New builds a service backed by the given API client.

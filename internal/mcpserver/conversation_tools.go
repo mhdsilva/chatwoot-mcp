@@ -69,7 +69,7 @@ func registerConversationTools(server *mcp.Server, svc service.Service) {
 	})
 
 	mcp.AddTool(server, &mcp.Tool{
-		Name: "set_priority",
+		Name:        "set_priority",
 		Description: "Set a conversation priority to none, low, medium, high or urgent and return the resulting value.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in setPriorityInput) (*mcp.CallToolResult, result[priorityOutput], error) {
 		priority, err := svc.SetPriority(ctx, in.ConversationID, in.Priority)

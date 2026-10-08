@@ -25,11 +25,18 @@ import (
 var _ func(context.Context, service.Service, io.Reader, io.Writer) error = Run
 
 var wantToolNames = []string{
+	"add_conversation_labels",
 	"add_private_note",
+	"assign_conversation",
 	"check_connection",
 	"get_contact_conversations",
 	"get_conversation",
+	"get_conversation_labels",
+	"list_agents",
 	"list_conversations",
+	"list_inboxes",
+	"list_teams",
+	"remove_conversation_labels",
 	"search_contacts",
 	"send_reply",
 	"set_conversation_status",
@@ -37,15 +44,22 @@ var wantToolNames = []string{
 }
 
 var wantRequired = map[string][]string{
-	"add_private_note":          {"conversation_id", "content"},
-	"check_connection":          nil,
-	"list_conversations":        nil,
-	"get_conversation":          {"conversation_id"},
-	"search_contacts":           {"query"},
-	"get_contact_conversations": {"contact_id"},
-	"send_reply":                {"conversation_id", "content"},
-	"set_conversation_status":   {"conversation_id", "status"},
-	"set_priority":              {"conversation_id", "priority"},
+	"add_conversation_labels":    {"conversation_id", "labels"},
+	"add_private_note":           {"conversation_id", "content"},
+	"assign_conversation":        {"conversation_id"},
+	"check_connection":           nil,
+	"get_conversation_labels":    {"conversation_id"},
+	"list_agents":                nil,
+	"list_conversations":         nil,
+	"list_inboxes":               nil,
+	"list_teams":                 nil,
+	"remove_conversation_labels": {"conversation_id", "labels"},
+	"get_conversation":           {"conversation_id"},
+	"search_contacts":            {"query"},
+	"get_contact_conversations":  {"contact_id"},
+	"send_reply":                 {"conversation_id", "content"},
+	"set_conversation_status":    {"conversation_id", "status"},
+	"set_priority":               {"conversation_id", "priority"},
 }
 
 type fakeService struct {
@@ -99,6 +113,29 @@ type fakeService struct {
 	priorityCalls  int
 	priorityID     int64
 	priorityValue  string
+
+	inboxes    []core.Inbox
+	inboxesErr error
+
+	agents    []core.Agent
+	agentsErr error
+
+	teams    []core.Team
+	teamsErr error
+
+	assignResult service.AssignmentResult
+	assignErr    error
+	assignCalls  int
+	assignConv   int64
+	assignAgent  int64
+	assignTeam   int64
+
+	labelsResult service.LabelsResult
+	labelsErr    error
+	labelsCalls  int
+	labelsOp     string
+	labelsConv   int64
+	labelsValues []string
 }
 
 func (f *fakeService) CheckConnection(context.Context) (core.Identity, error) {
@@ -159,6 +196,49 @@ func (f *fakeService) SetPriority(_ context.Context, id int64, priority string) 
 	f.priorityID = id
 	f.priorityValue = priority
 	return f.priorityResult, f.priorityErr
+}
+
+func (f *fakeService) ListInboxes(context.Context) ([]core.Inbox, error) {
+	return f.inboxes, f.inboxesErr
+}
+
+func (f *fakeService) ListAgents(context.Context) ([]core.Agent, error) {
+	return f.agents, f.agentsErr
+}
+
+func (f *fakeService) ListTeams(context.Context) ([]core.Team, error) {
+	return f.teams, f.teamsErr
+}
+
+func (f *fakeService) AssignConversation(_ context.Context, conversationID, agentID, teamID int64) (service.AssignmentResult, error) {
+	f.assignCalls++
+	f.assignConv = conversationID
+	f.assignAgent = agentID
+	f.assignTeam = teamID
+	return f.assignResult, f.assignErr
+}
+
+func (f *fakeService) GetConversationLabels(_ context.Context, conversationID int64) (service.LabelsResult, error) {
+	f.labelsCalls++
+	f.labelsOp = "get"
+	f.labelsConv = conversationID
+	return f.labelsResult, f.labelsErr
+}
+
+func (f *fakeService) AddConversationLabels(_ context.Context, conversationID int64, labels []string) (service.LabelsResult, error) {
+	f.labelsCalls++
+	f.labelsOp = "add"
+	f.labelsConv = conversationID
+	f.labelsValues = labels
+	return f.labelsResult, f.labelsErr
+}
+
+func (f *fakeService) RemoveConversationLabels(_ context.Context, conversationID int64, labels []string) (service.LabelsResult, error) {
+	f.labelsCalls++
+	f.labelsOp = "remove"
+	f.labelsConv = conversationID
+	f.labelsValues = labels
+	return f.labelsResult, f.labelsErr
 }
 
 // fakeAPI is a minimal core.API used to exercise the real service bounding and
@@ -449,6 +529,96 @@ func TestConversationToolValidationErrorCarriesCode(t *testing.T) {
 	}
 	if strings.Contains(resultText(res), "secret detail") {
 		t.Fatalf("upstream detail leaked: %s", resultText(res))
+	}
+}
+
+func TestListInboxesToolReturnsChannelTypes(t *testing.T) {
+	fake := &fakeService{inboxes: []core.Inbox{
+		{ID: 1, Name: "Site", ChannelType: "Channel::WebWidget"},
+		{ID: 2, Name: "Whats", ChannelType: "Channel::Whatsapp"},
+	}}
+	session, ctx := connectSession(t, fake)
+
+	res, err := session.CallTool(ctx, &mcp.CallToolParams{Name: "list_inboxes", Arguments: map[string]any{}})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("unexpected tool error: %s", resultText(res))
+	}
+	data := structuredData(t, res)
+	inboxes, ok := data["inboxes"].([]any)
+	if !ok || len(inboxes) != 2 {
+		t.Fatalf("inboxes = %#v", data["inboxes"])
+	}
+}
+
+func TestAssignConversationToolPassesIds(t *testing.T) {
+	fake := &fakeService{assignResult: service.AssignmentResult{ConversationID: 42, AgentID: 5, TeamID: 3}}
+	session, ctx := connectSession(t, fake)
+
+	res, err := session.CallTool(ctx, &mcp.CallToolParams{
+		Name:      "assign_conversation",
+		Arguments: map[string]any{"conversation_id": 42, "agent_id": 5, "team_id": 3},
+	})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("unexpected tool error: %s", resultText(res))
+	}
+	if fake.assignConv != 42 || fake.assignAgent != 5 || fake.assignTeam != 3 {
+		t.Fatalf("service call = (%d, %d, %d)", fake.assignConv, fake.assignAgent, fake.assignTeam)
+	}
+}
+
+func TestAddConversationLabelsToolPassesLabels(t *testing.T) {
+	fake := &fakeService{labelsResult: service.LabelsResult{
+		ConversationID: 42,
+		Previous:       []string{"vip"},
+		Labels:         []string{"vip", "urgent"},
+		Added:          []string{"urgent"},
+	}}
+	session, ctx := connectSession(t, fake)
+
+	res, err := session.CallTool(ctx, &mcp.CallToolParams{
+		Name:      "add_conversation_labels",
+		Arguments: map[string]any{"conversation_id": 42, "labels": []any{"urgent"}},
+	})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("unexpected tool error: %s", resultText(res))
+	}
+	if fake.labelsOp != "add" || fake.labelsConv != 42 || len(fake.labelsValues) != 1 || fake.labelsValues[0] != "urgent" {
+		t.Fatalf("service call = op %q conv %d values %#v", fake.labelsOp, fake.labelsConv, fake.labelsValues)
+	}
+	data := structuredData(t, res)
+	if labels, ok := data["labels"].([]any); !ok || len(labels) != 2 {
+		t.Fatalf("labels = %#v", data["labels"])
+	}
+	if previous, ok := data["previous_labels"].([]any); !ok || len(previous) != 1 {
+		t.Fatalf("previous_labels = %#v", data["previous_labels"])
+	}
+}
+
+func TestAssignUnknownAgentErrorCarriesNotFoundCode(t *testing.T) {
+	fake := &fakeService{assignErr: &service.Error{Code: service.CodeNotFound, Message: "agent 5 is not available"}}
+	session, ctx := connectSession(t, fake)
+
+	res, err := session.CallTool(ctx, &mcp.CallToolParams{
+		Name:      "assign_conversation",
+		Arguments: map[string]any{"conversation_id": 42, "agent_id": 5},
+	})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	if !res.IsError {
+		t.Fatal("expected an error result")
+	}
+	if e := structuredError(t, res); e["code"] != string(service.CodeNotFound) {
+		t.Fatalf("error = %#v", e)
 	}
 }
 
