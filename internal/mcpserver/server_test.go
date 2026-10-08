@@ -16,25 +16,30 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"chatwoot-mcp/internal/analytics"
 	"chatwoot-mcp/internal/chatwoot"
 	"chatwoot-mcp/internal/core"
 	"chatwoot-mcp/internal/service"
 )
 
 // Run must keep this exact public shape so the mcp command can wire it.
-var _ func(context.Context, service.Service, io.Reader, io.Writer) error = Run
+var _ func(context.Context, service.Service, analytics.Service, io.Reader, io.Writer) error = Run
 
 var wantToolNames = []string{
 	"add_conversation_labels",
 	"add_private_note",
 	"assign_conversation",
 	"check_connection",
+	"compare_performance",
 	"create_conversation",
+	"get_analytics_summary",
 	"get_contact",
 	"get_contact_conversations",
 	"get_conversation",
 	"get_conversation_labels",
+	"get_conversation_metrics",
 	"list_agents",
+	"list_attention_queue",
 	"list_conversations",
 	"list_inboxes",
 	"list_message_templates",
@@ -54,12 +59,16 @@ var wantRequired = map[string][]string{
 	"add_private_note":           {"conversation_id", "content"},
 	"assign_conversation":        {"conversation_id"},
 	"check_connection":           nil,
+	"compare_performance":        {"since", "until", "group_by"},
 	"create_conversation":        {"inbox_id", "contact_id"},
+	"get_analytics_summary":      {"since", "until"},
 	"get_contact":                {"contact_id"},
 	"get_contact_conversations":  {"contact_id"},
 	"get_conversation":           {"conversation_id"},
 	"get_conversation_labels":    {"conversation_id"},
+	"get_conversation_metrics":   {"conversation_id"},
 	"list_agents":                nil,
+	"list_attention_queue":       nil,
 	"list_conversations":         nil,
 	"list_inboxes":               nil,
 	"list_message_templates":     {"inbox_id"},
@@ -414,12 +423,12 @@ var errAPINotUsed = errors.New("unexpected API call in mcpserver test")
 
 var _ core.API = (*fakeAPI)(nil)
 
-func connectSession(t *testing.T, svc service.Service) (*mcp.ClientSession, context.Context) {
+func connectSession(t *testing.T, svc service.Service, insights analytics.Service) (*mcp.ClientSession, context.Context) {
 	t.Helper()
 	ctx, cancel := context.WithCancel(t.Context())
 	t.Cleanup(cancel)
 
-	server := newServer(svc)
+	server := newServer(svc, insights)
 	srvTransport, cliTransport := mcp.NewInMemoryTransports()
 	if _, err := server.Connect(ctx, srvTransport, nil); err != nil {
 		t.Fatalf("server connect: %v", err)
@@ -473,7 +482,7 @@ func resultText(res *mcp.CallToolResult) string {
 }
 
 func TestRegistersAllToolsWithRequiredFields(t *testing.T) {
-	session, ctx := connectSession(t, &fakeService{})
+	session, ctx := connectSession(t, &fakeService{}, &fakeAnalytics{})
 
 	res, err := session.ListTools(ctx, nil)
 	if err != nil {
@@ -537,7 +546,7 @@ func TestAddPrivateNoteToolUsesChosenConversation(t *testing.T) {
 		Private:        true,
 		Delivery:       service.DeliveryAcceptedByAPI,
 	}}
-	session, ctx := connectSession(t, fake)
+	session, ctx := connectSession(t, fake, &fakeAnalytics{})
 
 	res, err := session.CallTool(ctx, &mcp.CallToolParams{
 		Name:      "add_private_note",
@@ -560,7 +569,7 @@ func TestAddPrivateNoteToolUsesChosenConversation(t *testing.T) {
 
 func TestSetConversationStatusToolPassesArguments(t *testing.T) {
 	fake := &fakeService{statusResult: service.StatusResult{ConversationID: 42, Status: "snoozed", SnoozedUntil: "2030-07-21T17:32:28Z"}}
-	session, ctx := connectSession(t, fake)
+	session, ctx := connectSession(t, fake, &fakeAnalytics{})
 
 	res, err := session.CallTool(ctx, &mcp.CallToolParams{
 		Name:      "set_conversation_status",
@@ -583,7 +592,7 @@ func TestSetConversationStatusToolPassesArguments(t *testing.T) {
 
 func TestSetPriorityToolPassesArguments(t *testing.T) {
 	fake := &fakeService{priorityResult: service.PriorityResult{ConversationID: 42, Priority: "high"}}
-	session, ctx := connectSession(t, fake)
+	session, ctx := connectSession(t, fake, &fakeAnalytics{})
 
 	res, err := session.CallTool(ctx, &mcp.CallToolParams{
 		Name:      "set_priority",
@@ -605,7 +614,7 @@ func TestSetPriorityToolPassesArguments(t *testing.T) {
 
 func TestConversationToolValidationErrorCarriesCode(t *testing.T) {
 	fake := &fakeService{statusErr: &service.Error{Code: service.CodeInvalidInput, Message: "secret detail"}}
-	session, ctx := connectSession(t, fake)
+	session, ctx := connectSession(t, fake, &fakeAnalytics{})
 
 	res, err := session.CallTool(ctx, &mcp.CallToolParams{
 		Name:      "set_conversation_status",
@@ -631,7 +640,7 @@ func TestListInboxesToolReturnsChannelTypes(t *testing.T) {
 		{ID: 1, Name: "Site", ChannelType: "Channel::WebWidget"},
 		{ID: 2, Name: "Whats", ChannelType: "Channel::Whatsapp"},
 	}}
-	session, ctx := connectSession(t, fake)
+	session, ctx := connectSession(t, fake, &fakeAnalytics{})
 
 	res, err := session.CallTool(ctx, &mcp.CallToolParams{Name: "list_inboxes", Arguments: map[string]any{}})
 	if err != nil {
@@ -649,7 +658,7 @@ func TestListInboxesToolReturnsChannelTypes(t *testing.T) {
 
 func TestAssignConversationToolPassesIds(t *testing.T) {
 	fake := &fakeService{assignResult: service.AssignmentResult{ConversationID: 42, AgentID: 5, TeamID: 3}}
-	session, ctx := connectSession(t, fake)
+	session, ctx := connectSession(t, fake, &fakeAnalytics{})
 
 	res, err := session.CallTool(ctx, &mcp.CallToolParams{
 		Name:      "assign_conversation",
@@ -673,7 +682,7 @@ func TestAddConversationLabelsToolPassesLabels(t *testing.T) {
 		Labels:         []string{"vip", "urgent"},
 		Added:          []string{"urgent"},
 	}}
-	session, ctx := connectSession(t, fake)
+	session, ctx := connectSession(t, fake, &fakeAnalytics{})
 
 	res, err := session.CallTool(ctx, &mcp.CallToolParams{
 		Name:      "add_conversation_labels",
@@ -699,7 +708,7 @@ func TestAddConversationLabelsToolPassesLabels(t *testing.T) {
 
 func TestAssignUnknownAgentErrorCarriesNotFoundCode(t *testing.T) {
 	fake := &fakeService{assignErr: &service.Error{Code: service.CodeNotFound, Message: "agent 5 is not available"}}
-	session, ctx := connectSession(t, fake)
+	session, ctx := connectSession(t, fake, &fakeAnalytics{})
 
 	res, err := session.CallTool(ctx, &mcp.CallToolParams{
 		Name:      "assign_conversation",
@@ -725,7 +734,7 @@ func TestSendAttachmentToolPassesPathAndContent(t *testing.T) {
 		Size:           16,
 		Delivery:       service.DeliveryAcceptedByAPI,
 	}}
-	session, ctx := connectSession(t, fake)
+	session, ctx := connectSession(t, fake, &fakeAnalytics{})
 
 	res, err := session.CallTool(ctx, &mcp.CallToolParams{
 		Name:      "send_attachment",
@@ -747,7 +756,7 @@ func TestSendAttachmentToolPassesPathAndContent(t *testing.T) {
 
 func TestListMessageTemplatesToolPassesInbox(t *testing.T) {
 	fake := &fakeService{templates: []core.Template{{Name: "welcome", Language: "en_US", Body: "Hello {{1}}"}}}
-	session, ctx := connectSession(t, fake)
+	session, ctx := connectSession(t, fake, &fakeAnalytics{})
 
 	res, err := session.CallTool(ctx, &mcp.CallToolParams{
 		Name:      "list_message_templates",
@@ -775,7 +784,7 @@ func TestSendTemplateToolPassesParameters(t *testing.T) {
 		Message:        core.Message{ID: 901, Status: "sent"},
 		Delivery:       service.DeliveryAcceptedByAPI,
 	}}
-	session, ctx := connectSession(t, fake)
+	session, ctx := connectSession(t, fake, &fakeAnalytics{})
 
 	res, err := session.CallTool(ctx, &mcp.CallToolParams{
 		Name: "send_template",
@@ -803,7 +812,7 @@ func TestSendTemplateToolPassesParameters(t *testing.T) {
 
 func TestSendAttachmentChannelUnsupportedErrorCode(t *testing.T) {
 	fake := &fakeService{attachmentErr: &service.Error{Code: service.CodeChannelUnsupported, Message: "details"}}
-	session, ctx := connectSession(t, fake)
+	session, ctx := connectSession(t, fake, &fakeAnalytics{})
 
 	res, err := session.CallTool(ctx, &mcp.CallToolParams{
 		Name:      "send_attachment",
@@ -822,7 +831,7 @@ func TestSendAttachmentChannelUnsupportedErrorCode(t *testing.T) {
 
 func TestGetContactToolReturnsDetails(t *testing.T) {
 	fake := &fakeService{contactDetail: core.ContactDetail{ID: 99, Name: "Ana", Email: "ana@example.com", Blocked: false}}
-	session, ctx := connectSession(t, fake)
+	session, ctx := connectSession(t, fake, &fakeAnalytics{})
 
 	res, err := session.CallTool(ctx, &mcp.CallToolParams{Name: "get_contact", Arguments: map[string]any{"contact_id": 99}})
 	if err != nil {
@@ -841,7 +850,7 @@ func TestGetContactToolReturnsDetails(t *testing.T) {
 
 func TestUpdateContactToolPassesOnlyProvidedFields(t *testing.T) {
 	fake := &fakeService{updateContact: core.ContactDetail{ID: 99, Name: "Ana Maria"}}
-	session, ctx := connectSession(t, fake)
+	session, ctx := connectSession(t, fake, &fakeAnalytics{})
 
 	res, err := session.CallTool(ctx, &mcp.CallToolParams{
 		Name:      "update_contact",
@@ -865,7 +874,7 @@ func TestCreateConversationToolPassesIds(t *testing.T) {
 		ChannelType:    "Channel::WebWidget",
 		Status:         "open",
 	}}
-	session, ctx := connectSession(t, fake)
+	session, ctx := connectSession(t, fake, &fakeAnalytics{})
 
 	res, err := session.CallTool(ctx, &mcp.CallToolParams{
 		Name:      "create_conversation",
@@ -888,7 +897,7 @@ func TestCreateConversationToolPassesIds(t *testing.T) {
 
 func TestCreateConversationChannelUnsupportedErrorCode(t *testing.T) {
 	fake := &fakeService{createConvErr: &service.Error{Code: service.CodeChannelUnsupported, Message: "details"}}
-	session, ctx := connectSession(t, fake)
+	session, ctx := connectSession(t, fake, &fakeAnalytics{})
 
 	res, err := session.CallTool(ctx, &mcp.CallToolParams{
 		Name:      "create_conversation",
@@ -911,7 +920,7 @@ func TestSendReplyUsesChosenConversationID(t *testing.T) {
 		Message:        core.Message{ID: 500, Content: "Olá", Status: "sent", CreatedAt: 1700000001},
 		Delivery:       service.DeliveryAcceptedByAPI,
 	}}
-	session, ctx := connectSession(t, fake)
+	session, ctx := connectSession(t, fake, &fakeAnalytics{})
 
 	res, err := session.CallTool(ctx, &mcp.CallToolParams{
 		Name:      "send_reply",
@@ -950,7 +959,7 @@ func TestServiceErrorBecomesReadableCode(t *testing.T) {
 		Code:    service.CodeCannotReply,
 		Message: "conversation 42 cannot accept a reply",
 	}}
-	session, ctx := connectSession(t, fake)
+	session, ctx := connectSession(t, fake, &fakeAnalytics{})
 
 	res, err := session.CallTool(ctx, &mcp.CallToolParams{
 		Name:      "send_reply",
@@ -975,7 +984,7 @@ func TestServiceErrorBecomesReadableCode(t *testing.T) {
 }
 
 func TestValidationErrorCarriesCode(t *testing.T) {
-	session, ctx := connectSession(t, service.New(&fakeAPI{}))
+	session, ctx := connectSession(t, service.New(&fakeAPI{}), &fakeAnalytics{})
 
 	res, err := session.CallTool(ctx, &mcp.CallToolParams{
 		Name:      "search_contacts",
@@ -999,7 +1008,7 @@ func TestGetConversationSurfacesBoundedMessagesAndNotice(t *testing.T) {
 		messages[i] = core.Message{ID: int64(i + 1), Content: fmt.Sprintf("m%d", i+1), Status: "sent"}
 	}
 	api := &fakeAPI{getConv: core.Conversation{ID: 42, CanReply: true, Messages: messages}}
-	session, ctx := connectSession(t, service.New(api))
+	session, ctx := connectSession(t, service.New(api), &fakeAnalytics{})
 
 	res, err := session.CallTool(ctx, &mcp.CallToolParams{
 		Name:      "get_conversation",
@@ -1051,7 +1060,7 @@ func TestGetConversationIncludesSafeAttachmentMetadata(t *testing.T) {
 			}},
 		}},
 	}}
-	session, ctx := connectSession(t, service.New(fake))
+	session, ctx := connectSession(t, service.New(fake), &fakeAnalytics{})
 	res, err := session.CallTool(ctx, &mcp.CallToolParams{
 		Name:      "get_conversation",
 		Arguments: map[string]any{"conversation_id": 42},
@@ -1101,7 +1110,7 @@ func TestListConversationsIsBounded(t *testing.T) {
 		items[i] = core.Conversation{ID: int64(i + 1), Status: "open", CanReply: true}
 	}
 	fake := &fakeService{listPage: core.Page[core.Conversation]{Items: items, NextPage: 3}}
-	session, ctx := connectSession(t, fake)
+	session, ctx := connectSession(t, fake, &fakeAnalytics{})
 
 	res, err := session.CallTool(ctx, &mcp.CallToolParams{
 		Name:      "list_conversations",
@@ -1134,7 +1143,7 @@ func TestListConversationsIsBounded(t *testing.T) {
 
 func TestListConversationsDefaultsPageToOne(t *testing.T) {
 	fake := &fakeService{}
-	session, ctx := connectSession(t, fake)
+	session, ctx := connectSession(t, fake, &fakeAnalytics{})
 
 	if _, err := session.CallTool(ctx, &mcp.CallToolParams{
 		Name:      "list_conversations",
@@ -1170,7 +1179,7 @@ func TestOutputsNeverContainCredentialFields(t *testing.T) {
 			Delivery:       service.DeliveryAcceptedByAPI,
 		},
 	}
-	session, ctx := connectSession(t, fake)
+	session, ctx := connectSession(t, fake, &fakeAnalytics{})
 
 	calls := []struct {
 		name string
@@ -1238,7 +1247,7 @@ func TestGetConversationTruncatesLargeMessageContent(t *testing.T) {
 		UntrustedContent: true,
 		ContentNotice:    service.UntrustedContentNotice,
 	}}
-	session, ctx := connectSession(t, fake)
+	session, ctx := connectSession(t, fake, &fakeAnalytics{})
 
 	res, err := session.CallTool(ctx, &mcp.CallToolParams{
 		Name:      "get_conversation",
@@ -1272,7 +1281,7 @@ func TestGetConversationTruncatesOnRuneBoundary(t *testing.T) {
 		UntrustedContent: true,
 		ContentNotice:    service.UntrustedContentNotice,
 	}}
-	session, ctx := connectSession(t, fake)
+	session, ctx := connectSession(t, fake, &fakeAnalytics{})
 
 	res, err := session.CallTool(ctx, &mcp.CallToolParams{
 		Name:      "get_conversation",
@@ -1299,7 +1308,7 @@ func TestSearchContactsTruncatesTextFieldBytes(t *testing.T) {
 	fake := &fakeService{searchPage: core.Page[core.Contact]{
 		Items: []core.Contact{{ID: 99, Name: long, Email: long, Phone: long}},
 	}}
-	session, ctx := connectSession(t, fake)
+	session, ctx := connectSession(t, fake, &fakeAnalytics{})
 
 	res, err := session.CallTool(ctx, &mcp.CallToolParams{
 		Name:      "search_contacts",
@@ -1335,7 +1344,7 @@ func TestListConversationsTruncatesSummaryText(t *testing.T) {
 	fake := &fakeService{listPage: core.Page[core.Conversation]{
 		Items: []core.Conversation{{ID: 1, Status: long, CanReply: true}},
 	}}
-	session, ctx := connectSession(t, fake)
+	session, ctx := connectSession(t, fake, &fakeAnalytics{})
 
 	res, err := session.CallTool(ctx, &mcp.CallToolParams{
 		Name:      "list_conversations",
@@ -1364,7 +1373,7 @@ func TestSendReplyDoesNotAlterPostedContentButBoundsEcho(t *testing.T) {
 		Message:        core.Message{ID: 500, Content: big, Status: "sent"},
 		Delivery:       service.DeliveryAcceptedByAPI,
 	}}
-	session, ctx := connectSession(t, fake)
+	session, ctx := connectSession(t, fake, &fakeAnalytics{})
 
 	res, err := session.CallTool(ctx, &mcp.CallToolParams{
 		Name:      "send_reply",
@@ -1414,7 +1423,7 @@ func TestGetConversationTruncatesStatusFields(t *testing.T) {
 		UntrustedContent: true,
 		ContentNotice:    service.UntrustedContentNotice,
 	}}
-	session, ctx := connectSession(t, fake)
+	session, ctx := connectSession(t, fake, &fakeAnalytics{})
 
 	res, err := session.CallTool(ctx, &mcp.CallToolParams{
 		Name:      "get_conversation",
@@ -1452,7 +1461,7 @@ func TestSendReplyTruncatesEchoedStatus(t *testing.T) {
 		Message:        core.Message{ID: 500, Content: "Olá", Status: longStatus},
 		Delivery:       service.DeliveryAcceptedByAPI,
 	}}
-	session, ctx := connectSession(t, fake)
+	session, ctx := connectSession(t, fake, &fakeAnalytics{})
 
 	res, err := session.CallTool(ctx, &mcp.CallToolParams{
 		Name:      "send_reply",
@@ -1481,7 +1490,7 @@ func TestErrorTextIsFixedAndDoesNotEchoUpstream(t *testing.T) {
 	const secret = "super-secret-token-value"
 	huge := "upstream said: " + secret + " " + strings.Repeat("界", 1000)
 	fake := &fakeService{checkErr: &service.Error{Code: service.CodeUpstream, Message: huge}}
-	session, ctx := connectSession(t, fake)
+	session, ctx := connectSession(t, fake, &fakeAnalytics{})
 
 	res, err := session.CallTool(ctx, &mcp.CallToolParams{
 		Name:      "check_connection",
@@ -1498,8 +1507,8 @@ func TestErrorTextIsFixedAndDoesNotEchoUpstream(t *testing.T) {
 		t.Fatalf("code = %v, want %q (code must stay exact)", e["code"], service.CodeUpstream)
 	}
 	message, _ := e["message"].(string)
-	if message != fixedErrorMessage(service.CodeUpstream) {
-		t.Fatalf("message = %q, want the fixed %q message", message, fixedErrorMessage(service.CodeUpstream))
+	if message != fixedErrorMessage(string(service.CodeUpstream)) {
+		t.Fatalf("message = %q, want the fixed %q message", message, fixedErrorMessage(string(service.CodeUpstream)))
 	}
 	if len(message) > MaxErrorBytes {
 		t.Fatalf("error message = %d bytes, want <= %d", len(message), MaxErrorBytes)
@@ -1527,7 +1536,7 @@ func TestAPIErrorSecretNeverReachesMCPResult(t *testing.T) {
 		Resource:   "account 7 profile",
 		Message:    "upstream body: " + secret,
 	}}
-	session, ctx := connectSession(t, service.New(api))
+	session, ctx := connectSession(t, service.New(api), &fakeAnalytics{})
 
 	res, err := session.CallTool(ctx, &mcp.CallToolParams{
 		Name:      "check_connection",
@@ -1567,7 +1576,7 @@ func TestInvalidAPIResponseIsClassifiedWithoutLeakingBody(t *testing.T) {
 		ExpectedJSONType:   "array",
 		ActualJSONType:     "object",
 	}}
-	session, ctx := connectSession(t, service.New(api))
+	session, ctx := connectSession(t, service.New(api), &fakeAnalytics{})
 
 	res, err := session.CallTool(ctx, &mcp.CallToolParams{
 		Name:      "search_contacts",
@@ -1595,7 +1604,7 @@ func TestDeliveryUnknownMessageTellsToCheckBeforeRetry(t *testing.T) {
 		Code:    service.CodeDeliveryUnknown,
 		Message: "delivery detail " + secret,
 	}}
-	session, ctx := connectSession(t, fake)
+	session, ctx := connectSession(t, fake, &fakeAnalytics{})
 
 	res, err := session.CallTool(ctx, &mcp.CallToolParams{
 		Name:      "send_reply",
@@ -1669,7 +1678,7 @@ func TestRunKeepsProtocolOnStdoutAndDiagnosticsOffIt(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() {
-		done <- run(ctx, svc, inR, stdout, &diagnostics)
+		done <- run(ctx, svc, &fakeAnalytics{}, inR, stdout, &diagnostics)
 	}()
 
 	client := mcp.NewClient(&mcp.Implementation{Name: "test-client", Version: "v0"}, nil)

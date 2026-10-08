@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"chatwoot-mcp/internal/analytics"
 	"chatwoot-mcp/internal/app"
 	"chatwoot-mcp/internal/clientconfig"
 	"chatwoot-mcp/internal/config"
@@ -28,7 +29,7 @@ func TestPanelContinuesWhenBrowserCannotOpen(t *testing.T) {
 	}
 	err := runWith(context.Background(), []string{"panel"}, &stderr, strings.NewReader(""), &stdout,
 		func(string) error { return errors.New("no browser") }, serve,
-		func(context.Context, service.Service, io.Reader, io.Writer) error {
+		func(context.Context, service.Service, analytics.Service, io.Reader, io.Writer) error {
 			t.Fatal("unexpected MCP runner")
 			return nil
 		})
@@ -55,7 +56,7 @@ func TestMCPUnconfiguredWritesNoStdout(t *testing.T) {
 			t.Fatal("unexpected panel runner")
 			return nil
 		},
-		func(context.Context, service.Service, io.Reader, io.Writer) error {
+		func(context.Context, service.Service, analytics.Service, io.Reader, io.Writer) error {
 			t.Fatal("unexpected MCP runner")
 			return nil
 		})
@@ -225,10 +226,13 @@ func TestMCPConfiguredPassesStdioAndPropagatesRunnerError(t *testing.T) {
 			t.Fatal("unexpected panel runner")
 			return nil
 		},
-		func(_ context.Context, svc service.Service, gotIn io.Reader, gotOut io.Writer) error {
+		func(_ context.Context, svc service.Service, insights analytics.Service, gotIn io.Reader, gotOut io.Writer) error {
 			calls++
 			if svc == nil {
 				t.Fatal("MCP runner received nil service")
+			}
+			if insights == nil {
+				t.Fatal("MCP runner received nil analytics service")
 			}
 			if gotIn != stdin {
 				t.Fatal("MCP runner did not receive the supplied stdin")
@@ -263,7 +267,7 @@ func TestRunWithUsageErrors(t *testing.T) {
 					t.Fatal("unexpected panel runner")
 					return nil
 				},
-				func(context.Context, service.Service, io.Reader, io.Writer) error {
+				func(context.Context, service.Service, analytics.Service, io.Reader, io.Writer) error {
 					t.Fatal("unexpected MCP runner")
 					return nil
 				})

@@ -179,6 +179,10 @@ type errorEnvelope struct {
 }
 
 func (c *Client) call(ctx context.Context, method, path string, query url.Values, reqBody, resBody any, resource string) error {
+	return c.callWithBearer(ctx, method, path, query, reqBody, resBody, resource, false)
+}
+
+func (c *Client) callWithBearer(ctx context.Context, method, path string, query url.Values, reqBody, resBody any, resource string, bearer bool) error {
 	var reader io.Reader
 	if reqBody != nil {
 		payload, err := json.Marshal(reqBody)
@@ -193,6 +197,9 @@ func (c *Client) call(ctx context.Context, method, path string, query url.Values
 		return &Error{Kind: KindRequest, Resource: resource, Message: err.Error()}
 	}
 	req.Header.Set("api_access_token", c.token)
+	if bearer {
+		req.Header.Set("Authorization", "Bearer "+c.token)
+	}
 	req.Header.Set("Accept", "application/json")
 	if reqBody != nil {
 		req.Header.Set("Content-Type", "application/json")
@@ -461,16 +468,19 @@ func (a attachmentWire) toCore() core.MessageAttachment {
 }
 
 type conversationWire struct {
-	ID           int64         `json:"id"`
-	InboxID      int64         `json:"inbox_id"`
-	ContactID    int64         `json:"contact_id"`
-	Status       string        `json:"status"`
-	Priority     string        `json:"priority"`
-	Labels       []string      `json:"labels"`
-	SnoozedUntil string        `json:"snoozed_until"`
-	CanReply     bool          `json:"can_reply"`
-	Messages     []messageWire `json:"messages"`
-	Meta         struct {
+	ID             int64         `json:"id"`
+	InboxID        int64         `json:"inbox_id"`
+	ContactID      int64         `json:"contact_id"`
+	Status         string        `json:"status"`
+	Priority       *string       `json:"priority"`
+	Labels         []string      `json:"labels"`
+	SnoozedUntil   string        `json:"snoozed_until"`
+	CanReply       bool          `json:"can_reply"`
+	Messages       []messageWire `json:"messages"`
+	WaitingSince   *int64        `json:"waiting_since"`
+	LastActivityAt *int64        `json:"last_activity_at"`
+	UnreadCount    *int          `json:"unread_count"`
+	Meta           struct {
 		Sender struct {
 			ID int64 `json:"id"`
 		} `json:"sender"`
@@ -497,19 +507,37 @@ func (c conversationWire) toCore() core.Conversation {
 	for _, m := range c.Messages {
 		messages = append(messages, m.toCore())
 	}
+	priority := ""
+	if c.Priority != nil {
+		priority = *c.Priority
+	}
+	var waitingSince, lastActivityAt int64
+	if c.WaitingSince != nil {
+		waitingSince = *c.WaitingSince
+	}
+	if c.LastActivityAt != nil {
+		lastActivityAt = *c.LastActivityAt
+	}
+	var unreadCount int
+	if c.UnreadCount != nil {
+		unreadCount = *c.UnreadCount
+	}
 	return core.Conversation{
-		ID:           c.ID,
-		InboxID:      c.InboxID,
-		ContactID:    contactID,
-		ChannelType:  c.Meta.Channel,
-		Status:       c.Status,
-		Priority:     c.Priority,
-		Labels:       c.Labels,
-		AssigneeID:   c.Meta.Assignee.ID,
-		TeamID:       c.Meta.Team.ID,
-		SnoozedUntil: c.SnoozedUntil,
-		CanReply:     c.CanReply,
-		Messages:     messages,
+		ID:             c.ID,
+		InboxID:        c.InboxID,
+		ContactID:      contactID,
+		ChannelType:    c.Meta.Channel,
+		Status:         c.Status,
+		Priority:       priority,
+		Labels:         c.Labels,
+		AssigneeID:     c.Meta.Assignee.ID,
+		TeamID:         c.Meta.Team.ID,
+		SnoozedUntil:   c.SnoozedUntil,
+		CanReply:       c.CanReply,
+		Messages:       messages,
+		WaitingSince:   waitingSince,
+		LastActivityAt: lastActivityAt,
+		UnreadCount:    unreadCount,
 	}
 }
 
@@ -614,6 +642,9 @@ func (c *Client) ListConversations(ctx context.Context, opts core.ListOptions) (
 	}
 	if opts.InboxID > 0 {
 		query.Set("inbox_id", strconv.FormatInt(opts.InboxID, 10))
+	}
+	if opts.TeamID > 0 {
+		query.Set("team_id", strconv.FormatInt(opts.TeamID, 10))
 	}
 
 	var env conversationListEnvelope

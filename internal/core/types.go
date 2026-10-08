@@ -75,6 +75,11 @@ type Conversation struct {
 	Messages          []Message `json:"messages"`
 	MessageCount      int       `json:"-"`
 	MessageCountExact bool      `json:"-"`
+	// Queue metadata used by attention/SLA reporting. Unix timestamps; zero
+	// means the API did not report the field.
+	WaitingSince   int64 `json:"waiting_since,omitempty"`
+	LastActivityAt int64 `json:"last_activity_at,omitempty"`
+	UnreadCount    int   `json:"unread_count,omitempty"`
 }
 
 type Contact struct {
@@ -93,4 +98,5 @@ type ListOptions struct {
 	Page    int
 	Status  string
 	InboxID int64
+	TeamID  int64
 }
