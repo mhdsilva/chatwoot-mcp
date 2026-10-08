@@ -1,8 +1,10 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"net"
@@ -16,6 +18,7 @@ import (
 
 	"chatwoot-mcp/internal/app"
 	"chatwoot-mcp/internal/chatwoot"
+	"chatwoot-mcp/internal/clientconfig"
 	"chatwoot-mcp/internal/config"
 	"chatwoot-mcp/internal/core"
 	"chatwoot-mcp/internal/mcpserver"
@@ -39,10 +42,128 @@ func run(args []string, stderr io.Writer) error {
 }
 
 func runContext(ctx context.Context, args []string, stderr io.Writer, stdin io.Reader, stdout io.Writer) error {
-	if len(args) == 1 && args[0] == "app" {
+	if len(args) >= 1 && args[0] == "app" {
+		if len(args) != 1 {
+			return fmt.Errorf("app takes no arguments")
+		}
 		return runAppWith(ctx, stderr, openBrowser, app.Run)
 	}
+	if len(args) >= 1 && args[0] == "configure-client" {
+		return runConfigureClient(args[1:], stderr, stdout, stdin, configureDeps{
+			detect:     clientconfig.Detect,
+			plan:       clientconfig.PlanFor,
+			apply:      clientconfig.Apply,
+			executable: os.Executable,
+		})
+	}
 	return runWith(ctx, args, stderr, stdin, stdout, openBrowser, panel.ListenAndServe, mcpserver.Run)
+}
+
+type configureDeps struct {
+	detect     func(clientconfig.Client) (clientconfig.Target, error)
+	plan       func(clientconfig.Target, string) (clientconfig.Plan, error)
+	apply      func(clientconfig.Plan) (string, error)
+	executable func() (string, error)
+}
+
+// runConfigureClient registers the running binary in local MCP clients. It
+// prints the plan first and, unless --yes is given, asks for confirmation on
+// stdin; every existing file is backed up before it is rewritten.
+func runConfigureClient(args []string, stderr, stdout io.Writer, stdin io.Reader, deps configureDeps) error {
+	flags := flag.NewFlagSet("configure-client", flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	clientName := flags.String("client", "all", "claude, codex or all")
+	command := flags.String("command", "", "path to the chatwoot-mcp executable (defaults to this executable)")
+	configPath := flags.String("config", "", "override the client configuration path (single client only)")
+	assumeYes := flags.Bool("yes", false, "apply without prompting")
+	dryRun := flags.Bool("dry-run", false, "print the change without writing")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if flags.NArg() != 0 {
+		return fmt.Errorf("unexpected arguments: %s", strings.Join(flags.Args(), " "))
+	}
+
+	commandPath := strings.TrimSpace(*command)
+	if commandPath == "" {
+		executable, err := deps.executable()
+		if err != nil {
+			return fmt.Errorf("locate executable: %w", err)
+		}
+		commandPath = executable
+	}
+
+	var clients []clientconfig.Client
+	if strings.EqualFold(strings.TrimSpace(*clientName), "all") {
+		if strings.TrimSpace(*configPath) != "" {
+			return fmt.Errorf("--config requires a single --client")
+		}
+		clients = clientconfig.Supported()
+	} else {
+		client, err := clientconfig.ParseClient(*clientName)
+		if err != nil {
+			return err
+		}
+		clients = []clientconfig.Client{client}
+	}
+
+	for _, client := range clients {
+		target, err := resolveTarget(client, strings.TrimSpace(*configPath), deps.detect)
+		if err != nil {
+			return err
+		}
+		plan, err := deps.plan(target, commandPath)
+		if err != nil {
+			return err
+		}
+		if !plan.Changed {
+			fmt.Fprintf(stdout, "%s: already configured at %s\n", client, target.Path)
+			continue
+		}
+		if *dryRun {
+			fmt.Fprintf(stdout, "%s: would update %s to run %q\n", client, target.Path, commandPath)
+			continue
+		}
+		if !*assumeYes {
+			fmt.Fprintf(stdout, "%s: update %s to run %q? [y/N] ", client, target.Path, commandPath)
+			if !confirmed(stdin) {
+				fmt.Fprintf(stdout, "skipped %s\n", client)
+				continue
+			}
+		}
+		backup, err := deps.apply(plan)
+		if err != nil {
+			return err
+		}
+		if backup != "" {
+			fmt.Fprintf(stdout, "%s: updated %s (backup: %s)\n", client, target.Path, backup)
+		} else {
+			fmt.Fprintf(stdout, "%s: updated %s\n", client, target.Path)
+		}
+	}
+	return nil
+}
+
+func resolveTarget(client clientconfig.Client, override string, detect func(clientconfig.Client) (clientconfig.Target, error)) (clientconfig.Target, error) {
+	if override == "" {
+		return detect(client)
+	}
+	target := clientconfig.Target{Client: client, Path: override}
+	if _, err := os.Stat(override); err == nil {
+		target.Exists = true
+	}
+	return target, nil
+}
+
+func confirmed(stdin io.Reader) bool {
+	reader := bufio.NewReader(stdin)
+	line, _ := reader.ReadString('\n')
+	switch strings.ToLower(strings.TrimSpace(line)) {
+	case "y", "yes":
+		return true
+	default:
+		return false
+	}
 }
 
 type panelRunner func(context.Context, core.Store, panel.ClientFactory, int) error
@@ -67,7 +188,7 @@ func runAppWith(ctx context.Context, stderr io.Writer, browser browserOpener, se
 
 func runWith(ctx context.Context, args []string, stderr io.Writer, stdin io.Reader, stdout io.Writer, browser browserOpener, servePanel panelRunner, serveMCP mcpRunner) error {
 	if len(args) != 1 {
-		fmt.Fprintln(stderr, "usage: chatwoot-mcp <app|panel|mcp>")
+		fmt.Fprintln(stderr, "usage: chatwoot-mcp <app|panel|mcp|configure-client>")
 		return errors.New("expected one command")
 	}
 
@@ -94,7 +215,7 @@ func runWith(ctx context.Context, args []string, stderr io.Writer, stdin io.Read
 		api := chatwoot.NewClient(settings, nil)
 		return serveMCP(ctx, service.New(api), stdin, stdout)
 	default:
-		fmt.Fprintln(stderr, "usage: chatwoot-mcp <app|panel|mcp>")
+		fmt.Fprintln(stderr, "usage: chatwoot-mcp <app|panel|mcp|configure-client>")
 		return fmt.Errorf("unknown command: %s", args[0])
 	}
 }
