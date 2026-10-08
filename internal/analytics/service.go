@@ -41,35 +41,3 @@ func New(conversations ConversationSource, reports core.ReportsAPI, now func() t
 	}
 	return &service{conversations: conversations, reports: reports, now: now}
 }
-
-// SummaryRequest asks for metric summaries over a time range. Defined now so
-// the Service interface compiles; the reporting task fills in its fields.
-type SummaryRequest struct{}
-
-// SummaryResult carries summary metrics. Defined now so the Service interface
-// compiles; the reporting task fills in its fields.
-type SummaryResult struct{}
-
-// ConversationMetricsResult carries per-conversation metrics. Defined now so
-// the Service interface compiles; the reporting task fills in its fields.
-type ConversationMetricsResult struct{}
-
-// CompareRequest asks for a grouped comparison of two periods. Defined now so
-// the Service interface compiles; the reporting task fills in its fields.
-type CompareRequest struct{}
-
-// ComparisonResult carries comparison rows. Defined now so the Service
-// interface compiles; the reporting task fills in its fields.
-type ComparisonResult struct{}
-
-func (s *service) GetSummary(context.Context, SummaryRequest) (SummaryResult, error) {
-	return SummaryResult{}, &Error{Code: CodeUnsupportedFeature, Message: "analytics summary is not available yet"}
-}
-
-func (s *service) GetConversationMetrics(context.Context, int64) (ConversationMetricsResult, error) {
-	return ConversationMetricsResult{}, &Error{Code: CodeUnsupportedFeature, Message: "conversation metrics are not available yet"}
-}
-
-func (s *service) ComparePerformance(context.Context, CompareRequest) (ComparisonResult, error) {
-	return ComparisonResult{}, &Error{Code: CodeUnsupportedFeature, Message: "performance comparison is not available yet"}
-}

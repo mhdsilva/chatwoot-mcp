@@ -1,6 +1,7 @@
 package analytics
 
 import (
+	"context"
 	"errors"
 	"fmt"
 
@@ -85,6 +86,20 @@ func codeForKind(kind chatwoot.Kind) Code {
 func mapSourceError(err error) error {
 	var apiErr *chatwoot.Error
 	if errors.As(err, &apiErr) {
+		return &Error{Code: codeForKind(apiErr.Kind), Message: apiErr.Message, APIError: apiErr}
+	}
+	return &Error{Code: CodeUpstream, Message: err.Error()}
+}
+
+func mapReportError(err error, unsupported404 bool) error {
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return &Error{Code: CodeTimeout, Message: "report request was cancelled or timed out"}
+	}
+	var apiErr *chatwoot.Error
+	if errors.As(err, &apiErr) {
+		if unsupported404 && apiErr.Kind == chatwoot.KindNotFound {
+			return &Error{Code: CodeUnsupportedFeature, Message: "Chatwoot report endpoint is unavailable", APIError: apiErr}
+		}
 		return &Error{Code: codeForKind(apiErr.Kind), Message: apiErr.Message, APIError: apiErr}
 	}
 	return &Error{Code: CodeUpstream, Message: err.Error()}
