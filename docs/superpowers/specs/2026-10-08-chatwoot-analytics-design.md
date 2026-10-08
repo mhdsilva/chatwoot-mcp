@@ -146,7 +146,8 @@ Entrada:
 - `since` e `until` são RFC 3339 com fuso explícito;
 - `since` deve ser anterior a `until`;
 - o intervalo máximo é 183 dias;
-- `scope` aceita `account`, `agent`, `inbox`, `team` ou `label`;
+- `scope` é opcional, usa `account` por padrão e aceita `account`, `agent`,
+  `inbox`, `team` ou `label`;
 - `scope_id` deve ser positivo para qualquer escopo diferente de `account` e
   deve ser zero para `account`.
 
