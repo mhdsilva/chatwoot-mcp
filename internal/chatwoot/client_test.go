@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -21,6 +22,173 @@ const conversationJSON = `{"id":11,"inbox_id":5,"contact_id":0,"status":"open",`
 	`"messages":[{"id":1,"content":"hi","private":false,"status":"sent","created_at":1700000000}]}`
 
 const contactJSON = `{"id":99,"name":"Ana","email":"ana@example.com","phone_number":"+5511555"}`
+
+func TestResponseDiagnostics(t *testing.T) {
+	tests := []struct {
+		name        string
+		body        []byte
+		contentType string
+		err         error
+		format      string
+		decode      string
+	}{
+		{name: "HTML login page", body: []byte("<!doctype html><title>Login</title>"), contentType: "text/html; charset=utf-8", err: &json.SyntaxError{}, format: "html", decode: "malformed_json"},
+		{name: "empty response", body: nil, contentType: "application/json", err: io.EOF, format: "empty", decode: "empty_body"},
+		{name: "truncated JSON", body: []byte(`{"payload":`), contentType: "application/json", err: decodeTestJSON(`{"payload":`), format: "json", decode: "truncated_json"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := responseFormat(test.body, test.contentType); got != test.format {
+				t.Errorf("responseFormat = %q, want %q", got, test.format)
+			}
+			if got := responseDecodeKind(test.err); got != test.decode {
+				t.Errorf("responseDecodeKind = %q, want %q", got, test.decode)
+			}
+		})
+	}
+}
+
+func TestJSONTypeMismatchDiagnostics(t *testing.T) {
+	var envelope contactSearchEnvelope
+	err := json.Unmarshal([]byte(`{"payload":{}}`), &envelope)
+	var typeErr *json.UnmarshalTypeError
+	if !errors.As(err, &typeErr) {
+		t.Fatalf("error = %v, want *json.UnmarshalTypeError", err)
+	}
+	kind, field, expected, actual := responseDecodeDiagnostics(err)
+	if kind != "unexpected_json_type" || field != "payload" || expected != "array" || actual != "object" {
+		t.Fatalf("diagnostics = (%q, %q, %q, %q), want (unexpected_json_type, payload, array, object)", kind, field, expected, actual)
+	}
+}
+
+func TestPageMetaAcceptsNumericStrings(t *testing.T) {
+	var meta pageMeta
+	if err := json.Unmarshal([]byte(`{"count":"20","current_page":"1"}`), &meta); err != nil {
+		t.Fatalf("unmarshal page metadata: %v", err)
+	}
+	if meta.Count == nil || int(*meta.Count) != 20 || meta.CurrentPage == nil || int(*meta.CurrentPage) != 1 {
+		t.Fatalf("meta = %#v, want count 20 and current_page 1", meta)
+	}
+	if got := nextPage(1, &meta, 15); got != 2 {
+		t.Fatalf("next page = %d, want 2", got)
+	}
+}
+
+func TestGetConversationReadsMessagesAndSafeAttachmentMetadata(t *testing.T) {
+	var messageRequests int
+	transport := roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if got := req.Header.Get("api_access_token"); got != testToken {
+			t.Fatalf("api token header = %q, want configured token", got)
+		}
+		var body string
+		switch req.URL.Path {
+		case "/api/v1/accounts/7/conversations/42":
+			body = `{"id":42,"inbox_id":5,"contact_id":99,"status":"open","can_reply":true,"messages":[{"id":99,"content":"summary only"}]}`
+		case "/api/v1/accounts/7/conversations/42/messages":
+			messageRequests++
+			if req.URL.Query().Get("before") != "" {
+				t.Fatalf("unexpected before cursor on first message request: %s", req.URL.RawQuery)
+			}
+			body = `{"meta":{},"payload":[{"id":10,"content":"Olá","message_type":0,"content_type":"text","status":"sent","private":false,"created_at":1700000000},{"id":11,"content":"","message_type":0,"content_type":"text","status":"sent","private":false,"created_at":1700000001,"attachments":[{"id":91,"file_type":"audio","extension":"ogg","content_type":"audio/ogg","file_size":1234,"width":0,"height":0,"data_url":"https://private.invalid/file"}]}]}`
+		default:
+			t.Fatalf("unexpected request: %s %s", req.Method, req.URL)
+		}
+		return jsonHTTPResponse(req, body), nil
+	})
+	client := NewClient(core.Settings{BaseURL: "https://chatwoot.invalid", AccountID: 7, Token: testToken}, &http.Client{Transport: transport})
+
+	conversation, err := client.GetConversation(context.Background(), 42)
+	if err != nil {
+		t.Fatalf("GetConversation: %v", err)
+	}
+	if messageRequests != 1 {
+		t.Fatalf("message endpoint calls = %d, want 1", messageRequests)
+	}
+	if len(conversation.Messages) != 2 || conversation.Messages[0].Content != "Olá" || conversation.Messages[1].Content != "" {
+		t.Fatalf("messages = %#v, want both messages from the messages endpoint", conversation.Messages)
+	}
+	message := conversation.Messages[1]
+	if message.ContentType != "text" || len(message.Attachments) != 1 {
+		t.Fatalf("message metadata = %#v, want one attachment", message)
+	}
+	attachment := message.Attachments[0]
+	if attachment.FileType != "audio" || attachment.Extension != "ogg" || attachment.ContentType != "audio/ogg" || attachment.FileSize != 1234 {
+		t.Fatalf("attachment = %#v, want safe audio metadata", attachment)
+	}
+	encoded, err := json.Marshal(conversation)
+	if err != nil {
+		t.Fatalf("marshal conversation: %v", err)
+	}
+	if strings.Contains(string(encoded), "private.invalid/file") || strings.Contains(string(encoded), "data_url") {
+		t.Fatalf("private attachment URL leaked: %s", encoded)
+	}
+}
+
+func TestGetConversationPaginatesMessageHistory(t *testing.T) {
+	var messageRequests int
+	transport := roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		var body string
+		switch req.URL.Path {
+		case "/api/v1/accounts/7/conversations/42":
+			body = `{"id":42,"inbox_id":5,"contact_id":99,"status":"open","can_reply":true}`
+		case "/api/v1/accounts/7/conversations/42/messages":
+			messageRequests++
+			before := req.URL.Query().Get("before")
+			switch before {
+			case "":
+				body = testMessagePage(31, 50)
+			case "31":
+				body = testMessagePage(11, 30)
+			case "11":
+				body = testMessagePage(1, 10)
+			default:
+				t.Fatalf("unexpected before cursor %q", before)
+			}
+		default:
+			t.Fatalf("unexpected request: %s %s", req.Method, req.URL)
+		}
+		return jsonHTTPResponse(req, body), nil
+	})
+	client := NewClient(core.Settings{BaseURL: "https://chatwoot.invalid", AccountID: 7, Token: testToken}, &http.Client{Transport: transport})
+
+	conversation, err := client.GetConversation(context.Background(), 42)
+	if err != nil {
+		t.Fatalf("GetConversation: %v", err)
+	}
+	if messageRequests != 3 {
+		t.Fatalf("message endpoint calls = %d, want 3", messageRequests)
+	}
+	if len(conversation.Messages) != 50 || conversation.Messages[0].ID != 1 || conversation.Messages[49].ID != 50 {
+		t.Fatalf("messages length/range = %d/%d..%d, want 50/1..50", len(conversation.Messages), conversation.Messages[0].ID, conversation.Messages[len(conversation.Messages)-1].ID)
+	}
+}
+
+func jsonHTTPResponse(req *http.Request, body string) *http.Response {
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(body)),
+		Request:    req,
+	}
+}
+
+func testMessagePage(firstID, lastID int) string {
+	var payload strings.Builder
+	payload.WriteString(`{"meta":{},"payload":[`)
+	for id := firstID; id <= lastID; id++ {
+		if id > firstID {
+			payload.WriteByte(',')
+		}
+		fmt.Fprintf(&payload, `{"id":%d,"content":"message %d","message_type":0,"content_type":"text","status":"sent","private":false,"created_at":1700000000}`, id, id)
+	}
+	payload.WriteString(`]}`)
+	return payload.String()
+}
+
+func decodeTestJSON(raw string) error {
+	var value any
+	return json.Unmarshal([]byte(raw), &value)
+}
 
 func newTestClient(t *testing.T, handler http.HandlerFunc) (*Client, *httptest.Server) {
 	t.Helper()
@@ -144,13 +312,17 @@ func TestListConversations(t *testing.T) {
 
 func TestGetConversation(t *testing.T) {
 	c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
-		if got := r.URL.Path; got != "/api/v1/accounts/7/conversations/42" {
-			t.Errorf("path = %q", got)
-		}
 		if got := r.Header.Get("api_access_token"); got != testToken {
 			t.Errorf("token header = %q", got)
 		}
-		_, _ = w.Write([]byte(conversationJSON))
+		switch r.URL.Path {
+		case "/api/v1/accounts/7/conversations/42":
+			_, _ = w.Write([]byte(conversationJSON))
+		case "/api/v1/accounts/7/conversations/42/messages":
+			_, _ = w.Write([]byte(`{"payload":[{"id":1,"content":"hi","status":"sent","private":false,"created_at":1700000000}]}`))
+		default:
+			t.Errorf("unexpected path = %q", r.URL.Path)
+		}
 	})
 
 	conv, err := c.GetConversation(context.Background(), 42)
@@ -385,18 +557,26 @@ func TestTimeout(t *testing.T) {
 }
 
 func TestBaseURLPrefixAndTrailingSlash(t *testing.T) {
-	var got string
+	var gotConversation, gotMessages bool
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		got = r.URL.Path
-		_, _ = w.Write([]byte(conversationJSON))
+		switch r.URL.Path {
+		case "/chatwoot/api/v1/accounts/7/conversations/42":
+			gotConversation = true
+			_, _ = w.Write([]byte(conversationJSON))
+		case "/chatwoot/api/v1/accounts/7/conversations/42/messages":
+			gotMessages = true
+			_, _ = w.Write([]byte(`{"payload":[]}`))
+		default:
+			t.Errorf("unexpected path = %q", r.URL.Path)
+		}
 	}))
 	defer srv.Close()
 	c := NewClient(core.Settings{BaseURL: srv.URL + "/chatwoot/", AccountID: 7, Token: testToken}, srv.Client())
 	if _, err := c.GetConversation(context.Background(), 42); err != nil {
 		t.Fatalf("GetConversation: %v", err)
 	}
-	if got != "/chatwoot/api/v1/accounts/7/conversations/42" {
-		t.Fatalf("path = %q, want /chatwoot/api/v1/accounts/7/conversations/42", got)
+	if !gotConversation || !gotMessages {
+		t.Fatalf("conversation/messages requests = %t/%t, want both", gotConversation, gotMessages)
 	}
 }
 

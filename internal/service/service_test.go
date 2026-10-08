@@ -144,6 +144,9 @@ func TestGetConversationBoundsMessages(t *testing.T) {
 	if result.TotalMessages != total {
 		t.Fatalf("total = %d, want %d", result.TotalMessages, total)
 	}
+	if !result.TotalMessagesExact {
+		t.Fatal("total_messages_exact = false, want true for an unbounded fixture")
+	}
 	if result.ReturnedMessages != MaxMessages || len(result.Conversation.Messages) != MaxMessages {
 		t.Fatalf("returned = %d (len %d), want %d", result.ReturnedMessages, len(result.Conversation.Messages), MaxMessages)
 	}
@@ -155,6 +158,18 @@ func TestGetConversationBoundsMessages(t *testing.T) {
 	}
 	if got := result.Conversation.Messages[len(result.Conversation.Messages)-1].ID; got != int64(total) {
 		t.Fatalf("last kept id = %d, want %d (newest messages must be kept)", got, total)
+	}
+}
+
+func TestGetConversationMarksCappedMessageCountInexact(t *testing.T) {
+	messages := make([]core.Message, 60)
+	fake := &fakeAPI{getConv: core.Conversation{ID: 42, Messages: messages, MessageCount: 60, MessageCountExact: false}}
+	result, err := New(fake).GetConversation(context.Background(), 42)
+	if err != nil {
+		t.Fatalf("GetConversation: %v", err)
+	}
+	if result.TotalMessages != 60 || result.TotalMessagesExact || !result.Truncated {
+		t.Fatalf("count metadata = (%d, exact=%t, truncated=%t), want (60, false, true)", result.TotalMessages, result.TotalMessagesExact, result.Truncated)
 	}
 }
 
@@ -227,6 +242,27 @@ func TestSearchContactsRejectsEmptyQuery(t *testing.T) {
 	requireCode(t, err, CodeInvalidInput)
 	if fake.searchCalls != 0 {
 		t.Fatalf("search called for empty query")
+	}
+}
+
+func TestSearchContactsClassifiesUpstreamResponses(t *testing.T) {
+	tests := []struct {
+		name string
+		kind chatwoot.Kind
+		want Code
+	}{
+		{name: "server error", kind: chatwoot.KindServer, want: CodeUpstreamServer},
+		{name: "invalid response", kind: chatwoot.KindInvalid, want: CodeInvalidResponse},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			fake := &fakeAPI{searchErr: &chatwoot.Error{Kind: test.kind, StatusCode: 502, Message: "private response body"}}
+			_, err := New(fake).SearchContacts(context.Background(), "ana", 1)
+			svcErr := requireCode(t, err, test.want)
+			if svcErr.APIError == nil || svcErr.APIError.StatusCode != 502 {
+				t.Fatalf("API error status = %#v, want 502", svcErr.APIError)
+			}
+		})
 	}
 }
 

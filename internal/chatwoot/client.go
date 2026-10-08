@@ -12,9 +12,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime"
 	"net"
 	"net/http"
 	"net/url"
+	"reflect"
 	"strconv"
 	"strings"
 	"time"
@@ -27,6 +29,8 @@ const (
 	conversationPageSize     = 25
 	contactSearchPageSize    = 15
 	contactConversationsPage = 25
+	messagePageSize          = 20
+	maxConversationMessages  = 60
 	maxResponseBytes         = 8 << 20
 	maxErrorBodyBytes        = 8 << 10
 )
@@ -48,11 +52,16 @@ const (
 
 // Error is a normalized Chatwoot API failure. It never carries the token.
 type Error struct {
-	Kind       Kind
-	StatusCode int
-	Resource   string
-	Message    string
-	RetryAfter time.Duration
+	Kind               Kind
+	StatusCode         int
+	Resource           string
+	Message            string
+	RetryAfter         time.Duration
+	ResponseFormat     string
+	ResponseDecodeKind string
+	ResponseField      string
+	ExpectedJSONType   string
+	ActualJSONType     string
 }
 
 func (e *Error) Error() string {
@@ -207,13 +216,113 @@ func (c *Client) call(ctx context.Context, method, path string, query url.Values
 		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, maxResponseBytes))
 		return nil
 	}
-	if err := json.NewDecoder(io.LimitReader(resp.Body, maxResponseBytes)).Decode(resBody); err != nil {
+	body, readErr := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes))
+	if readErr != nil {
+		if isTimeoutError(ctx, readErr) {
+			return &Error{Kind: KindTimeout, StatusCode: resp.StatusCode, Resource: resource, Message: readErr.Error()}
+		}
+		return &Error{Kind: KindTransport, StatusCode: resp.StatusCode, Resource: resource, Message: "read response: " + readErr.Error()}
+	}
+	if err := json.NewDecoder(bytes.NewReader(body)).Decode(resBody); err != nil {
 		if isTimeoutError(ctx, err) {
 			return &Error{Kind: KindTimeout, StatusCode: resp.StatusCode, Resource: resource, Message: err.Error()}
 		}
-		return &Error{Kind: KindInvalid, StatusCode: resp.StatusCode, Resource: resource, Message: "decode response: " + err.Error()}
+		decodeKind, field, expectedType, actualType := responseDecodeDiagnostics(err)
+		return &Error{
+			Kind:               KindInvalid,
+			StatusCode:         resp.StatusCode,
+			Resource:           resource,
+			Message:            "decode response: " + err.Error(),
+			ResponseFormat:     responseFormat(body, resp.Header.Get("Content-Type")),
+			ResponseDecodeKind: decodeKind,
+			ResponseField:      field,
+			ExpectedJSONType:   expectedType,
+			ActualJSONType:     actualType,
+		}
 	}
 	return nil
+}
+
+// responseFormat returns a small, safe category for a malformed response. It
+// never includes the body or arbitrary Content-Type parameters.
+func responseFormat(body []byte, contentType string) string {
+	trimmed := bytes.TrimSpace(body)
+	if len(trimmed) == 0 {
+		return "empty"
+	}
+	mediaType, _, _ := mime.ParseMediaType(contentType)
+	if mediaType == "text/html" || bytes.HasPrefix(bytes.ToLower(trimmed), []byte("<!doctype html")) || bytes.HasPrefix(bytes.ToLower(trimmed), []byte("<html")) {
+		return "html"
+	}
+	if mediaType == "application/json" || strings.HasSuffix(mediaType, "+json") || trimmed[0] == '{' || trimmed[0] == '[' {
+		return "json"
+	}
+	return "other"
+}
+
+// responseDecodeKind maps decoder errors to stable names without exposing any
+// bytes from the upstream response.
+func responseDecodeKind(err error) string {
+	kind, _, _, _ := responseDecodeDiagnostics(err)
+	return kind
+}
+
+func responseDecodeDiagnostics(err error) (kind, field, expectedType, actualType string) {
+	switch {
+	case errors.Is(err, io.EOF):
+		return "empty_body", "", "", ""
+	case errors.Is(err, io.ErrUnexpectedEOF):
+		return "truncated_json", "", "", ""
+	}
+	var syntaxErr *json.SyntaxError
+	if errors.As(err, &syntaxErr) {
+		if strings.Contains(syntaxErr.Error(), "unexpected end of JSON input") {
+			return "truncated_json", "", "", ""
+		}
+		return "malformed_json", "", "", ""
+	}
+	var typeErr *json.UnmarshalTypeError
+	if errors.As(err, &typeErr) {
+		expected := typeErr.Type
+		if expected.Kind() == reflect.Pointer {
+			expected = expected.Elem()
+		}
+		return "unexpected_json_type", typeErr.Field, jsonTypeName(expected.Kind()), jsonValueType(typeErr.Value)
+	}
+	return "decode_error", "", "", ""
+}
+
+func jsonValueType(value string) string {
+	switch value {
+	case "object", "array", "string", "number", "bool", "null":
+		if value == "bool" {
+			return "boolean"
+		}
+		return value
+	default:
+		return "unknown"
+	}
+}
+
+func jsonTypeName(kind reflect.Kind) string {
+	switch kind {
+	case reflect.Struct, reflect.Map:
+		return "object"
+	case reflect.Slice, reflect.Array:
+		return "array"
+	case reflect.String:
+		return "string"
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64,
+		reflect.Float32, reflect.Float64:
+		return "number"
+	case reflect.Bool:
+		return "boolean"
+	case reflect.Invalid:
+		return "null"
+	default:
+		return "unknown"
+	}
 }
 
 func transportError(ctx context.Context, err error, resource string) *Error {
@@ -296,15 +405,49 @@ func parseRetryAfter(value string) time.Duration {
 }
 
 type messageWire struct {
-	ID        int64  `json:"id"`
-	Content   string `json:"content"`
-	Private   bool   `json:"private"`
-	Status    string `json:"status"`
-	CreatedAt int64  `json:"created_at"`
+	ID          int64            `json:"id"`
+	Content     string           `json:"content"`
+	MessageType int              `json:"message_type"`
+	ContentType string           `json:"content_type"`
+	Attachments []attachmentWire `json:"attachments"`
+	Private     bool             `json:"private"`
+	Status      string           `json:"status"`
+	CreatedAt   int64            `json:"created_at"`
 }
 
 func (m messageWire) toCore() core.Message {
-	return core.Message{ID: m.ID, Content: m.Content, Private: m.Private, Status: m.Status, CreatedAt: m.CreatedAt}
+	attachments := make([]core.MessageAttachment, 0, len(m.Attachments))
+	for _, attachment := range m.Attachments {
+		attachments = append(attachments, attachment.toCore())
+	}
+	return core.Message{
+		ID:          m.ID,
+		Content:     m.Content,
+		MessageType: m.MessageType,
+		ContentType: m.ContentType,
+		Attachments: attachments,
+		Private:     m.Private,
+		Status:      m.Status,
+		CreatedAt:   m.CreatedAt,
+	}
+}
+
+type attachmentWire struct {
+	ID          int64  `json:"id"`
+	FileType    string `json:"file_type"`
+	Extension   string `json:"extension"`
+	ContentType string `json:"content_type"`
+	FileSize    int64  `json:"file_size"`
+}
+
+func (a attachmentWire) toCore() core.MessageAttachment {
+	return core.MessageAttachment{
+		ID:          a.ID,
+		FileType:    a.FileType,
+		Extension:   a.Extension,
+		ContentType: a.ContentType,
+		FileSize:    a.FileSize,
+	}
 }
 
 type conversationWire struct {
@@ -319,6 +462,10 @@ type conversationWire struct {
 			ID int64 `json:"id"`
 		} `json:"sender"`
 	} `json:"meta"`
+}
+
+type conversationMessagesEnvelope struct {
+	Payload []messageWire `json:"payload"`
 }
 
 func (c conversationWire) toCore() core.Conversation {
@@ -355,10 +502,33 @@ type conversationMeta struct {
 	AllCount *int `json:"all_count"`
 }
 
+// jsonInt accepts pagination counts encoded as either JSON numbers or numeric
+// strings, which Chatwoot installations may return from the search endpoint.
+type jsonInt int
+
+func (n *jsonInt) UnmarshalJSON(data []byte) error {
+	trimmed := bytes.TrimSpace(data)
+	if len(trimmed) == 0 {
+		return io.ErrUnexpectedEOF
+	}
+	value := string(trimmed)
+	if trimmed[0] == '"' {
+		if err := json.Unmarshal(trimmed, &value); err != nil {
+			return err
+		}
+	}
+	parsed, err := strconv.Atoi(value)
+	if err != nil {
+		return fmt.Errorf("expected integer or numeric string")
+	}
+	*n = jsonInt(parsed)
+	return nil
+}
+
 type pageMeta struct {
-	Count       *int  `json:"count"`
-	CurrentPage *int  `json:"current_page"`
-	HasMore     *bool `json:"has_more"`
+	Count       *jsonInt `json:"count"`
+	CurrentPage *jsonInt `json:"current_page"`
+	HasMore     *bool    `json:"has_more"`
 }
 
 type conversationListEnvelope struct {
@@ -453,7 +623,65 @@ func (c *Client) GetConversation(ctx context.Context, id int64) (core.Conversati
 	if err := c.call(ctx, http.MethodGet, c.accountPath()+"/conversations/"+strconv.FormatInt(id, 10), nil, nil, &conv, resource); err != nil {
 		return core.Conversation{}, err
 	}
-	return conv.toCore(), nil
+	messages, messageCount, messageCountExact, err := c.conversationMessages(ctx, id)
+	if err != nil {
+		return core.Conversation{}, err
+	}
+	result := conv.toCore()
+	result.Messages = make([]core.Message, len(messages))
+	for i, message := range messages {
+		result.Messages[i] = message.toCore()
+	}
+	result.MessageCount = messageCount
+	result.MessageCountExact = messageCountExact
+	return result, nil
+}
+
+func (c *Client) conversationMessages(ctx context.Context, conversationID int64) ([]messageWire, int, bool, error) {
+	path := c.accountPath() + "/conversations/" + strconv.FormatInt(conversationID, 10) + "/messages"
+	var messages []messageWire
+	var before int64
+	seen := make(map[int64]struct{}, maxConversationMessages)
+	exact := false
+	for {
+		query := url.Values{}
+		if before > 0 {
+			query.Set("before", strconv.FormatInt(before, 10))
+		}
+		var envelope conversationMessagesEnvelope
+		if err := c.call(ctx, http.MethodGet, path, query, nil, &envelope, "conversation messages"); err != nil {
+			return nil, 0, false, err
+		}
+		page := envelope.Payload
+		if len(page) == 0 {
+			exact = true
+			break
+		}
+		older := make([]messageWire, 0, len(page))
+		for _, message := range page {
+			if _, ok := seen[message.ID]; ok {
+				continue
+			}
+			seen[message.ID] = struct{}{}
+			older = append(older, message)
+		}
+		messages = append(older, messages...)
+		if len(messages) > maxConversationMessages {
+			messages = messages[len(messages)-maxConversationMessages:]
+		}
+		if len(page) < messagePageSize {
+			exact = true
+			break
+		}
+		if page[0].ID <= 0 || (before > 0 && page[0].ID >= before) {
+			break
+		}
+		before = page[0].ID
+		if len(seen) >= maxConversationMessages {
+			break
+		}
+	}
+	return messages, len(seen), exact, nil
 }
 
 // SearchContacts searches resolved contacts by name, email, phone or identifier.
@@ -513,7 +741,7 @@ func nextPage(page int, meta *pageMeta, pageSize int) int {
 		}
 		return 0
 	}
-	if meta.Count != nil && meta.CurrentPage != nil && *meta.CurrentPage*pageSize < *meta.Count {
+	if meta.Count != nil && meta.CurrentPage != nil && int(*meta.CurrentPage)*pageSize < int(*meta.Count) {
 		return page + 1
 	}
 	return 0

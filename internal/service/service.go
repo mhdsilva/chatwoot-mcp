@@ -41,6 +41,8 @@ const (
 	CodeRateLimited          Code = "rate_limited"
 	CodeTimeout              Code = "timeout"
 	CodeUpstream             Code = "upstream_error"
+	CodeUpstreamServer       Code = "upstream_server_error"
+	CodeInvalidResponse      Code = "invalid_response"
 )
 
 // Error is a typed service failure. It wraps the originating Chatwoot error,
@@ -78,12 +80,13 @@ func CodeOf(err error) Code {
 // ConversationResult is a bounded read of one conversation. Truncated reports
 // whether older messages were dropped; the messages kept are the most recent.
 type ConversationResult struct {
-	Conversation     core.Conversation `json:"conversation"`
-	TotalMessages    int               `json:"total_messages"`
-	ReturnedMessages int               `json:"returned_messages"`
-	Truncated        bool              `json:"truncated"`
-	UntrustedContent bool              `json:"untrusted_content"`
-	ContentNotice    string            `json:"content_notice,omitempty"`
+	Conversation       core.Conversation `json:"conversation"`
+	TotalMessages      int               `json:"total_messages"`
+	TotalMessagesExact bool              `json:"total_messages_exact"`
+	ReturnedMessages   int               `json:"returned_messages"`
+	Truncated          bool              `json:"truncated"`
+	UntrustedContent   bool              `json:"untrusted_content"`
+	ContentNotice      string            `json:"content_notice,omitempty"`
 }
 
 // SendResult reports an accepted reply and keeps the message Chatwoot returned.
@@ -207,9 +210,14 @@ func (s *service) SendReply(ctx context.Context, conversationID int64, content s
 }
 
 func bound(conv core.Conversation) ConversationResult {
-	total := len(conv.Messages)
+	total := conv.MessageCount
+	totalExact := conv.MessageCountExact
+	if total == 0 && !totalExact {
+		total = len(conv.Messages)
+		totalExact = true
+	}
 	kept := conv.Messages
-	truncated := total > MaxMessages
+	truncated := total > MaxMessages || len(kept) > MaxMessages
 	if truncated {
 		kept = kept[total-MaxMessages:]
 	}
@@ -218,10 +226,11 @@ func bound(conv core.Conversation) ConversationResult {
 	conv.Messages = bounded
 
 	result := ConversationResult{
-		Conversation:     conv,
-		TotalMessages:    total,
-		ReturnedMessages: len(bounded),
-		Truncated:        truncated,
+		Conversation:       conv,
+		TotalMessages:      total,
+		TotalMessagesExact: totalExact,
+		ReturnedMessages:   len(bounded),
+		Truncated:          truncated,
 	}
 	if len(bounded) > 0 {
 		result.UntrustedContent = true
@@ -264,6 +273,10 @@ func codeForKind(kind chatwoot.Kind) Code {
 		return CodeRateLimited
 	case chatwoot.KindTimeout:
 		return CodeTimeout
+	case chatwoot.KindServer:
+		return CodeUpstreamServer
+	case chatwoot.KindInvalid:
+		return CodeInvalidResponse
 	default:
 		return CodeUpstream
 	}

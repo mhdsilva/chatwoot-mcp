@@ -39,20 +39,36 @@ type Identity struct {
 }
 
 type Message struct {
-	ID        int64  `json:"id"`
-	Content   string `json:"content"`
-	Private   bool   `json:"private"`
-	Status    string `json:"status"`
-	CreatedAt int64  `json:"created_at"`
+	ID                   int64               `json:"id"`
+	Content              string              `json:"content"`
+	MessageType          int                 `json:"message_type"`
+	ContentType          string              `json:"content_type,omitempty"`
+	Attachments          []MessageAttachment `json:"attachments,omitempty"`
+	AttachmentsTruncated bool                `json:"attachments_truncated,omitempty"`
+	Private              bool                `json:"private"`
+	Status               string              `json:"status"`
+	CreatedAt            int64               `json:"created_at"`
+}
+
+// MessageAttachment contains non-URL metadata for an attachment. Download URLs
+// are intentionally excluded because they may be private or short-lived.
+type MessageAttachment struct {
+	ID          int64  `json:"id"`
+	FileType    string `json:"file_type"`
+	Extension   string `json:"extension,omitempty"`
+	ContentType string `json:"content_type,omitempty"`
+	FileSize    int64  `json:"file_size,omitempty"`
 }
 
 type Conversation struct {
-	ID        int64     `json:"id"`
-	InboxID   int64     `json:"inbox_id"`
-	ContactID int64     `json:"contact_id"`
-	Status    string    `json:"status"`
-	CanReply  bool      `json:"can_reply"`
-	Messages  []Message `json:"messages"`
+	ID                int64     `json:"id"`
+	InboxID           int64     `json:"inbox_id"`
+	ContactID         int64     `json:"contact_id"`
+	Status            string    `json:"status"`
+	CanReply          bool      `json:"can_reply"`
+	Messages          []Message `json:"messages"`
+	MessageCount      int       `json:"-"`
+	MessageCountExact bool      `json:"-"`
 }
 
 type Contact struct {

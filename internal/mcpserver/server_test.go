@@ -116,9 +116,10 @@ func (f *fakeService) SendReply(_ context.Context, id int64, content string) (se
 // fakeAPI is a minimal core.API used to exercise the real service bounding and
 // to inject upstream failures.
 type fakeAPI struct {
-	checkErr error
-	getConv  core.Conversation
-	getErr   error
+	checkErr  error
+	getConv   core.Conversation
+	getErr    error
+	searchErr error
 }
 
 func (f *fakeAPI) Check(context.Context) (core.Identity, error) { return core.Identity{}, f.checkErr }
@@ -132,7 +133,7 @@ func (f *fakeAPI) GetConversation(context.Context, int64) (core.Conversation, er
 }
 
 func (f *fakeAPI) SearchContacts(context.Context, string, int) (core.Page[core.Contact], error) {
-	return core.Page[core.Contact]{}, nil
+	return core.Page[core.Contact]{}, f.searchErr
 }
 
 func (f *fakeAPI) ContactConversations(context.Context, int64, int) (core.Page[core.Conversation], error) {
@@ -369,6 +370,9 @@ func TestGetConversationSurfacesBoundedMessagesAndNotice(t *testing.T) {
 	if got := data["total_messages"]; got != float64(total) {
 		t.Fatalf("total_messages = %v, want %d", got, total)
 	}
+	if got := data["total_messages_exact"]; got != true {
+		t.Fatalf("total_messages_exact = %v, want true", got)
+	}
 	if got := data["returned_messages"]; got != float64(service.MaxMessages) {
 		t.Fatalf("returned_messages = %v, want %d", got, service.MaxMessages)
 	}
@@ -389,6 +393,60 @@ func TestGetConversationSurfacesBoundedMessagesAndNotice(t *testing.T) {
 	}
 	if !strings.Contains(resultText(res), "untrusted") {
 		t.Fatalf("tool text missing untrusted notice: %s", resultText(res))
+	}
+}
+
+func TestGetConversationIncludesSafeAttachmentMetadata(t *testing.T) {
+	const privateURL = "https://private.invalid/one-time-download"
+	fake := &fakeAPI{getConv: core.Conversation{
+		ID: 42,
+		Messages: []core.Message{{
+			ID: 7, ContentType: "text", Attachments: []core.MessageAttachment{{
+				ID: 91, FileType: "audio", Extension: "ogg", ContentType: "audio/ogg", FileSize: 1234,
+			}},
+		}},
+	}}
+	session, ctx := connectSession(t, service.New(fake))
+	res, err := session.CallTool(ctx, &mcp.CallToolParams{
+		Name:      "get_conversation",
+		Arguments: map[string]any{"conversation_id": 42},
+	})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("unexpected tool error: %s", resultText(res))
+	}
+	blob, _ := json.Marshal(res)
+	if !strings.Contains(string(blob), `"file_type":"audio"`) || strings.Contains(string(blob), privateURL) {
+		t.Fatalf("attachment metadata missing or private URL leaked: %s", blob)
+	}
+}
+
+func TestTruncateMessageBoundsAttachmentMetadata(t *testing.T) {
+	attachments := make([]core.MessageAttachment, MaxMessageAttachments+2)
+	for i := range attachments {
+		attachments[i] = core.MessageAttachment{
+			FileType:    strings.Repeat("a", MaxTextBytes*2),
+			Extension:   strings.Repeat("b", MaxTextBytes*2),
+			ContentType: strings.Repeat("c", MaxTextBytes*2),
+		}
+	}
+
+	message, truncated := truncateMessage(core.Message{Attachments: attachments})
+	if !truncated || !message.AttachmentsTruncated {
+		t.Fatal("message metadata was not marked truncated")
+	}
+	if len(message.Attachments) != MaxMessageAttachments {
+		t.Fatalf("attachments = %d, want %d", len(message.Attachments), MaxMessageAttachments)
+	}
+	for _, attachment := range message.Attachments {
+		if len(attachment.FileType) > MaxTextBytes || len(attachment.Extension) > MaxTextBytes || len(attachment.ContentType) > MaxTextBytes {
+			t.Fatalf("attachment metadata exceeded text bound: %#v", attachment)
+		}
+	}
+	if len(attachments) != MaxMessageAttachments+2 || len(attachments[0].FileType) != MaxTextBytes*2 {
+		t.Fatal("truncateMessage mutated the caller's attachment slice")
 	}
 }
 
@@ -836,8 +894,11 @@ func TestAPIErrorSecretNeverReachesMCPResult(t *testing.T) {
 	if !res.IsError {
 		t.Fatalf("IsError = false, want true for an upstream failure")
 	}
-	if got := structuredError(t, res)["code"]; got != string(service.CodeUpstream) {
-		t.Fatalf("code = %v, want %q", got, service.CodeUpstream)
+	if got := structuredError(t, res)["code"]; got != string(service.CodeUpstreamServer) {
+		t.Fatalf("code = %v, want %q", got, service.CodeUpstreamServer)
+	}
+	if got := structuredError(t, res)["status_code"]; got != float64(500) {
+		t.Fatalf("status_code = %v, want 500", got)
 	}
 	blob, _ := json.Marshal(res)
 	if strings.Contains(string(blob), secret) {
@@ -845,6 +906,41 @@ func TestAPIErrorSecretNeverReachesMCPResult(t *testing.T) {
 	}
 	if strings.Contains(resultText(res), secret) {
 		t.Fatalf("API body secret leaked into content text: %s", resultText(res))
+	}
+}
+
+func TestInvalidAPIResponseIsClassifiedWithoutLeakingBody(t *testing.T) {
+	const secret = "sensitive-upstream-payload"
+	api := &fakeAPI{searchErr: &chatwoot.Error{
+		Kind:               chatwoot.KindInvalid,
+		StatusCode:         200,
+		Resource:           "contacts search",
+		Message:            "unexpected body: " + secret,
+		ResponseFormat:     "json",
+		ResponseDecodeKind: "unexpected_json_type",
+		ResponseField:      "payload",
+		ExpectedJSONType:   "array",
+		ActualJSONType:     "object",
+	}}
+	session, ctx := connectSession(t, service.New(api))
+
+	res, err := session.CallTool(ctx, &mcp.CallToolParams{
+		Name:      "search_contacts",
+		Arguments: map[string]any{"query": "34998147021"},
+	})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	if !res.IsError {
+		t.Fatal("IsError = false, want true for an invalid upstream response")
+	}
+	e := structuredError(t, res)
+	if e["code"] != string(service.CodeInvalidResponse) || e["status_code"] != float64(200) || e["response_format"] != "json" || e["decode_error"] != "unexpected_json_type" || e["field"] != "payload" || e["expected_json_type"] != "array" || e["actual_json_type"] != "object" {
+		t.Fatalf("error = %#v, want invalid_response with sanitized response diagnostics", e)
+	}
+	blob, _ := json.Marshal(res)
+	if strings.Contains(string(blob), secret) {
+		t.Fatalf("upstream body leaked into result: %s", blob)
 	}
 }
 
