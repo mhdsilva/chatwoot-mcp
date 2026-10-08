@@ -66,6 +66,7 @@ func (f *fakeAnalytics) ComparePerformance(_ context.Context, request analytics.
 
 func TestListAttentionQueueToolPassesFiltersAndPreservesScan(t *testing.T) {
 	observed := time.Date(2026, 10, 8, 15, 0, 0, 0, time.UTC)
+	activity := observed.Add(-2 * time.Hour)
 	fake := &fakeAnalytics{queueResult: analytics.QueueResult{
 		ObservedAt: observed,
 		Conversations: []analytics.AttentionConversation{{
@@ -79,7 +80,7 @@ func TestListAttentionQueueToolPassesFiltersAndPreservesScan(t *testing.T) {
 			TeamID:         3,
 			WaitingSince:   observed.Add(-90 * time.Minute),
 			WaitingSeconds: 5400,
-			LastActivityAt: observed.Add(-2 * time.Hour),
+			LastActivityAt: &activity,
 			UnreadCount:    2,
 		}},
 		ScannedPages:         3,

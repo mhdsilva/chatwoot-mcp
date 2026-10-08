@@ -3,6 +3,7 @@ package analytics
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -11,6 +12,14 @@ import (
 	"chatwoot-mcp/internal/chatwoot"
 	"chatwoot-mcp/internal/core"
 )
+
+func TestAnalyticsErrorWithoutAPIErrorDoesNotUnwrapTypedNil(t *testing.T) {
+	err := &Error{Code: CodeUnsupportedFeature, Message: "not available"}
+	var apiErr *chatwoot.Error
+	if errors.As(err, &apiErr) {
+		t.Fatalf("errors.As matched nil API error: %#v", apiErr)
+	}
+}
 
 type reportsFake struct {
 	summary         core.ReportSummary

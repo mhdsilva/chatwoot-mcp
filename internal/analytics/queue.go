@@ -35,18 +35,18 @@ type QueueRequest struct {
 // AttentionConversation is one row of the attention queue. It carries only
 // conversation metadata, never message content.
 type AttentionConversation struct {
-	ConversationID int64     `json:"conversation_id"`
-	ContactID      int64     `json:"contact_id"`
-	InboxID        int64     `json:"inbox_id"`
-	ChannelType    string    `json:"channel_type,omitempty"`
-	Status         string    `json:"status"`
-	Priority       string    `json:"priority,omitempty"`
-	AssigneeID     int64     `json:"assignee_id,omitempty"`
-	TeamID         int64     `json:"team_id,omitempty"`
-	WaitingSince   time.Time `json:"waiting_since"`
-	WaitingSeconds int64     `json:"waiting_seconds"`
-	LastActivityAt time.Time `json:"last_activity_at,omitempty"`
-	UnreadCount    int       `json:"unread_count,omitempty"`
+	ConversationID int64      `json:"conversation_id"`
+	ContactID      int64      `json:"contact_id"`
+	InboxID        int64      `json:"inbox_id"`
+	ChannelType    string     `json:"channel_type,omitempty"`
+	Status         string     `json:"status"`
+	Priority       string     `json:"priority,omitempty"`
+	AssigneeID     int64      `json:"assignee_id,omitempty"`
+	TeamID         int64      `json:"team_id,omitempty"`
+	WaitingSince   time.Time  `json:"waiting_since"`
+	WaitingSeconds int64      `json:"waiting_seconds"`
+	LastActivityAt *time.Time `json:"last_activity_at,omitempty"`
+	UnreadCount    int        `json:"unread_count,omitempty"`
 }
 
 // QueueResult reports one bounded queue scan. Complete and Truncated are set
@@ -166,9 +166,10 @@ func projectConversation(conversation core.Conversation, observedAt time.Time) A
 		// negative wait.
 		waitingSeconds = 0
 	}
-	var lastActivityAt time.Time
+	var lastActivityAt *time.Time
 	if conversation.LastActivityAt > 0 {
-		lastActivityAt = time.Unix(conversation.LastActivityAt, 0).UTC()
+		value := time.Unix(conversation.LastActivityAt, 0).UTC()
+		lastActivityAt = &value
 	}
 	return AttentionConversation{
 		ConversationID: conversation.ID,

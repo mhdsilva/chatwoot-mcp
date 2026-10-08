@@ -2,8 +2,10 @@ package analytics
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -124,7 +126,7 @@ func TestAttentionQueueDefaultsFiltersSortsAndLimits(t *testing.T) {
 	if first.WaitingSince != time.Unix(fixedNow.Unix()-900, 0).UTC() {
 		t.Fatalf("waiting_since = %v", first.WaitingSince)
 	}
-	if first.LastActivityAt != time.Unix(fixedNow.Unix()-840, 0).UTC() {
+	if first.LastActivityAt == nil || !first.LastActivityAt.Equal(time.Unix(fixedNow.Unix()-840, 0).UTC()) {
 		t.Fatalf("last_activity_at = %v", first.LastActivityAt)
 	}
 	if first.UnreadCount != 1 || first.InboxID != 2 || first.ContactID != 45 ||
@@ -137,6 +139,16 @@ func TestAttentionQueueDefaultsFiltersSortsAndLimits(t *testing.T) {
 	}
 	if result.ScannedPages != 1 || result.ScannedConversations != 4 {
 		t.Fatalf("unexpected scan counters: %+v", result)
+	}
+}
+
+func TestAttentionConversationOmitsMissingLastActivity(t *testing.T) {
+	data, err := json.Marshal(AttentionConversation{ConversationID: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "last_activity_at") {
+		t.Fatalf("missing last activity was serialized: %s", data)
 	}
 }
 

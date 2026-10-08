@@ -40,18 +40,18 @@ type comparePerformanceInput struct {
 // attentionQueueRow projects one queue row with its conversation-derived text
 // fields bounded. The queue never carries message content.
 type attentionQueueRow struct {
-	ConversationID int64     `json:"conversation_id"`
-	ContactID      int64     `json:"contact_id"`
-	InboxID        int64     `json:"inbox_id"`
-	ChannelType    string    `json:"channel_type,omitempty"`
-	Status         string    `json:"status"`
-	Priority       string    `json:"priority,omitempty"`
-	AssigneeID     int64     `json:"assignee_id,omitempty"`
-	TeamID         int64     `json:"team_id,omitempty"`
-	WaitingSince   time.Time `json:"waiting_since"`
-	WaitingSeconds int64     `json:"waiting_seconds"`
-	LastActivityAt time.Time `json:"last_activity_at,omitempty"`
-	UnreadCount    int       `json:"unread_count,omitempty"`
+	ConversationID int64      `json:"conversation_id"`
+	ContactID      int64      `json:"contact_id"`
+	InboxID        int64      `json:"inbox_id"`
+	ChannelType    string     `json:"channel_type,omitempty"`
+	Status         string     `json:"status"`
+	Priority       string     `json:"priority,omitempty"`
+	AssigneeID     int64      `json:"assignee_id,omitempty"`
+	TeamID         int64      `json:"team_id,omitempty"`
+	WaitingSince   time.Time  `json:"waiting_since"`
+	WaitingSeconds int64      `json:"waiting_seconds"`
+	LastActivityAt *time.Time `json:"last_activity_at,omitempty"`
+	UnreadCount    int        `json:"unread_count,omitempty"`
 }
 
 type attentionQueueOutput struct {

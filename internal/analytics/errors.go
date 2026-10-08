@@ -46,7 +46,12 @@ func (e *Error) Error() string {
 }
 
 // Unwrap exposes the underlying Chatwoot error to errors.As and errors.Is.
-func (e *Error) Unwrap() error { return e.APIError }
+func (e *Error) Unwrap() error {
+	if e == nil || e.APIError == nil {
+		return nil
+	}
+	return e.APIError
+}
 
 // CodeOf reports the machine-readable code of err, or "" when err is not an
 // analytics error.
