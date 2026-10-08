@@ -312,6 +312,56 @@ func TestListConversations(t *testing.T) {
 	})
 }
 
+func TestListConversationsDecodesAttentionMetadata(t *testing.T) {
+	payload := `{"data":{"meta":{"all_count":1},"payload":[{
+	  "id":123,"inbox_id":2,"status":"open","priority":"high",
+	  "waiting_since":1791451800,"last_activity_at":1791451805,
+	  "unread_count":3,"meta":{"sender":{"id":45},"assignee":{"id":8},"team":{"id":9}}
+	}]}}`
+	c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		if q.Get("status") != "open" || q.Get("inbox_id") != "2" || q.Get("team_id") != "9" || q.Get("page") != "1" {
+			t.Errorf("query = %v", q)
+		}
+		_, _ = w.Write([]byte(payload))
+	})
+
+	page, err := c.ListConversations(context.Background(), core.ListOptions{Page: 1, Status: "open", InboxID: 2, TeamID: 9})
+	if err != nil {
+		t.Fatalf("ListConversations: %v", err)
+	}
+	if len(page.Items) != 1 {
+		t.Fatalf("items = %d, want 1", len(page.Items))
+	}
+	got := page.Items[0]
+	if got.ID != 123 || got.InboxID != 2 || got.Status != "open" || got.Priority != "high" {
+		t.Fatalf("conversation = %#v", got)
+	}
+	if got.WaitingSince != 1791451800 || got.LastActivityAt != 1791451805 || got.UnreadCount != 3 {
+		t.Fatalf("queue fields = %#v, want waiting 1791451800, activity 1791451805, unread 3", got)
+	}
+	if got.ContactID != 45 || got.AssigneeID != 8 || got.TeamID != 9 {
+		t.Fatalf("meta fields = %#v, want contact 45, assignee 8, team 9", got)
+	}
+
+	t.Run("absent and null fields decode as zero values", func(t *testing.T) {
+		c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+			_, _ = w.Write([]byte(`{"data":{"meta":{"all_count":1},"payload":[{"id":5,"inbox_id":1,"status":"open","priority":null,"waiting_since":null,"last_activity_at":null,"unread_count":null,"meta":{"sender":null,"assignee":null,"team":null}}]}}`))
+		})
+		page, err := c.ListConversations(context.Background(), core.ListOptions{Page: 1})
+		if err != nil {
+			t.Fatalf("ListConversations: %v", err)
+		}
+		if len(page.Items) != 1 {
+			t.Fatalf("items = %d, want 1", len(page.Items))
+		}
+		got := page.Items[0]
+		if got.WaitingSince != 0 || got.LastActivityAt != 0 || got.UnreadCount != 0 || got.AssigneeID != 0 || got.TeamID != 0 || got.Priority != "" {
+			t.Fatalf("zero-value decode = %#v, want all zero", got)
+		}
+	})
+}
+
 func TestGetConversation(t *testing.T) {
 	c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		if got := r.Header.Get("api_access_token"); got != testToken {
