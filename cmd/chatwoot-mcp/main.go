@@ -14,6 +14,7 @@ import (
 	"strings"
 	"syscall"
 
+	"chatwoot-mcp/internal/app"
 	"chatwoot-mcp/internal/chatwoot"
 	"chatwoot-mcp/internal/config"
 	"chatwoot-mcp/internal/core"
@@ -38,17 +39,35 @@ func run(args []string, stderr io.Writer) error {
 }
 
 func runContext(ctx context.Context, args []string, stderr io.Writer, stdin io.Reader, stdout io.Writer) error {
+	if len(args) == 1 && args[0] == "app" {
+		return runAppWith(ctx, stderr, openBrowser, app.Run)
+	}
 	return runWith(ctx, args, stderr, stdin, stdout, openBrowser, panel.ListenAndServe, mcpserver.Run)
 }
 
 type panelRunner func(context.Context, core.Store, panel.ClientFactory, int) error
 type mcpRunner func(context.Context, service.Service, io.Reader, io.Writer) error
+type appRunner func(context.Context, app.Options) error
 
 type browserOpener func(string) error
 
+// runAppWith builds the shared service dependencies and starts the desktop app.
+func runAppWith(ctx context.Context, stderr io.Writer, browser browserOpener, serveApp appRunner) error {
+	factory := func(settings core.Settings) core.API {
+		return chatwoot.NewClient(settings, nil)
+	}
+	return serveApp(ctx, app.Options{
+		Store:       config.NewStore(""),
+		Factory:     factory,
+		Port:        panelPort,
+		OpenBrowser: browser,
+		Diagnostics: stderr,
+	})
+}
+
 func runWith(ctx context.Context, args []string, stderr io.Writer, stdin io.Reader, stdout io.Writer, browser browserOpener, servePanel panelRunner, serveMCP mcpRunner) error {
 	if len(args) != 1 {
-		fmt.Fprintln(stderr, "usage: chatwoot-mcp <panel|mcp>")
+		fmt.Fprintln(stderr, "usage: chatwoot-mcp <app|panel|mcp>")
 		return errors.New("expected one command")
 	}
 
@@ -75,7 +94,7 @@ func runWith(ctx context.Context, args []string, stderr io.Writer, stdin io.Read
 		api := chatwoot.NewClient(settings, nil)
 		return serveMCP(ctx, service.New(api), stdin, stdout)
 	default:
-		fmt.Fprintln(stderr, "usage: chatwoot-mcp <panel|mcp>")
+		fmt.Fprintln(stderr, "usage: chatwoot-mcp <app|panel|mcp>")
 		return fmt.Errorf("unknown command: %s", args[0])
 	}
 }

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"chatwoot-mcp/internal/app"
 	"chatwoot-mcp/internal/config"
 	"chatwoot-mcp/internal/core"
 	"chatwoot-mcp/internal/panel"
@@ -62,6 +63,33 @@ func TestMCPUnconfiguredWritesNoStdout(t *testing.T) {
 	}
 	if stdout.Len() != 0 {
 		t.Fatalf("unexpected stdout: %q", stdout.String())
+	}
+}
+
+func TestAppRunnerReceivesSharedDependencies(t *testing.T) {
+	var stderr bytes.Buffer
+	called := false
+	serveApp := func(_ context.Context, opts app.Options) error {
+		called = true
+		if opts.Store == nil {
+			t.Fatal("app runner received nil store")
+		}
+		if opts.Factory == nil {
+			t.Fatal("app runner received nil client factory")
+		}
+		if opts.Port != panelPort {
+			t.Fatalf("port = %d, want %d", opts.Port, panelPort)
+		}
+		if opts.OpenBrowser == nil || opts.Diagnostics == nil {
+			t.Fatal("app runner received nil browser or diagnostics")
+		}
+		return nil
+	}
+	if err := runAppWith(context.Background(), &stderr, func(string) error { return nil }, serveApp); err != nil {
+		t.Fatalf("runAppWith: %v", err)
+	}
+	if !called {
+		t.Fatal("app runner was not called")
 	}
 }
 
@@ -140,7 +168,7 @@ func TestRunWithUsageErrors(t *testing.T) {
 			if err == nil {
 				t.Fatal("expected usage error")
 			}
-			if !strings.Contains(stderr.String(), "usage: chatwoot-mcp <panel|mcp>") {
+			if !strings.Contains(stderr.String(), "usage: chatwoot-mcp <app|panel|mcp>") {
 				t.Fatalf("usage missing from stderr: %q", stderr.String())
 			}
 			if stdout.Len() != 0 {

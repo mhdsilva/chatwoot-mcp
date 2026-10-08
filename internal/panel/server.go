@@ -75,7 +75,14 @@ func ListenAndServe(ctx context.Context, store core.Store, factory ClientFactory
 		return fmt.Errorf("listen on loopback: %w", err)
 	}
 	actualPort := listener.Addr().(*net.TCPAddr).Port
-	h, err := NewHandler(store, factory, actualPort)
+	return Serve(ctx, listener, store, factory, actualPort)
+}
+
+// Serve serves the panel on an already-bound loopback listener until ctx is
+// cancelled. port is the actual listener port used for host and origin checks.
+// It closes the listener if the handler cannot be built.
+func Serve(ctx context.Context, listener net.Listener, store core.Store, factory ClientFactory, port int) error {
+	h, err := NewHandler(store, factory, port)
 	if err != nil {
 		_ = listener.Close()
 		return err
