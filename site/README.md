@@ -1,6 +1,6 @@
 # Site público
 
-Landing page estática do Chatwoot MCP. Ela é independente do painel local que fica em `web/`.
+Landing page estática do Chatwoot MCP. Ela é independente do painel local que fica em `web/` e inclui uma demonstração interativa com dados fictícios.
 
 Para visualizar localmente, sirva a raiz do repositório e abra `/site/`:
 

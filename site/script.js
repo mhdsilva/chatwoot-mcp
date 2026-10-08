@@ -1,41 +1,58 @@
-const demos = {
-  localizar: {
-    prompt: 'Ache a conversa do cliente pelo telefone final 7021.',
-    tool: 'search_contacts',
-    result: 'Busca concluída · 1 contato',
-    answer: 'Encontrei o contato e duas conversas. A mais recente está na caixa WhatsApp e aceita resposta.'
-  },
-  entender: {
-    prompt: 'O que ficou combinado nessa conversa?',
-    tool: 'get_conversation',
-    result: 'Histórico lido · 15 mensagens',
-    answer: 'O cliente confirmou o escopo e enviou um áudio por último. Há contexto suficiente para preparar o retorno.'
-  },
-  responder: {
-    prompt: 'Envie a resposta que acabei de aprovar.',
-    tool: 'send_reply',
-    result: 'Aceita pela API · envio único',
-    answer: 'A resposta foi aceita pelo Chatwoot. O ID e o estado retornados ficaram registrados.'
-  }
+const tickets = {
+  acme: { avatar: 'AL', name: 'Acme Logística', id: 'Conversa #9321', summary: 'Cliente precisa corrigir o endereço de um pedido que ainda não foi despachado.', history: '24 mensagens analisadas', priority: 'Urgente · risco de despacho', action: 'Confirmar novo endereço e sinalizar logística', tool: 'assign_conversation' },
+  juliana: { avatar: 'JC', name: 'Juliana Costa', id: 'Conversa #9318', summary: 'Cliente quer entender valores e condições antes da renovação anual.', history: '11 mensagens analisadas', priority: 'Normal · decisão comercial', action: 'Atribuir para a equipe financeira', tool: 'assign_conversation' },
+  norte: { avatar: 'MN', name: 'Mercado Norte', id: 'Conversa #9312', summary: 'Pagamento foi realizado, mas o boleto continua aparecendo em aberto.', history: '17 mensagens analisadas', priority: 'Alta · pagamento pendente', action: 'Registrar nota e solicitar comprovante', tool: 'add_private_note' },
+  oficina: { avatar: 'OC', name: 'Oficina Central', id: 'Conversa #9309', summary: 'Cliente enviou imagens que mostram uma possível falha na peça recebida.', history: '31 mensagens e 3 anexos', priority: 'Alta · produto com defeito', action: 'Adicionar etiqueta de garantia', tool: 'add_conversation_labels' },
+  beatriz: { avatar: 'BL', name: 'Beatriz Lima', id: 'Conversa #9297', summary: 'O acesso foi liberado e a equipe aguarda a confirmação da cliente.', history: '9 mensagens analisadas', priority: 'Normal · validação pendente', action: 'Manter status aguardando cliente', tool: 'set_conversation_status' },
+  solar: { avatar: 'SE', name: 'Solar Engenharia', id: 'Conversa #9274', summary: 'A equipe precisa do número do pedido para localizar a solicitação comercial.', history: '14 mensagens analisadas', priority: 'Normal · falta informação', action: 'Aguardar retorno do cliente', tool: 'set_conversation_status' },
+  lucas: { avatar: 'LM', name: 'Lucas Martins', id: 'Conversa #9251', summary: 'Proposta comercial enviada e pendente de aprovação pelo cliente.', history: '22 mensagens analisadas', priority: 'Normal · proposta enviada', action: 'Programar acompanhamento comercial', tool: 'add_private_note' }
 };
 
-const demoBody = document.querySelector('[data-demo-body]');
-const demoTabs = document.querySelectorAll('[data-demo-tab]');
+const inspector = {
+  avatar: document.querySelector('[data-inspector-avatar]'),
+  name: document.querySelector('[data-inspector-name]'),
+  id: document.querySelector('[data-inspector-id]'),
+  summary: document.querySelector('[data-inspector-summary]'),
+  history: document.querySelector('[data-inspector-history]'),
+  priority: document.querySelector('[data-inspector-priority]'),
+  action: document.querySelector('[data-inspector-action]'),
+  tool: document.querySelector('[data-inspector-tool]')
+};
 
-function renderDemo(key) {
-  const demo = demos[key];
-  demoBody.innerHTML = `
-    <div class="message user-message">${demo.prompt}</div>
-    <div class="tool-call"><span class="tool-icon">⌁</span><span><strong>${demo.tool}</strong><small>${demo.result}</small></span><span class="tool-check">✓</span></div>
-    <div class="message agent-message"><span class="avatar">AI</span><p>${demo.answer}</p></div>
-  `;
+const simulateButton = document.querySelector('[data-simulate]');
+
+function selectTicket(key) {
+  const ticket = tickets[key];
+  if (!ticket) return;
+
+  document.querySelectorAll('[data-ticket]').forEach((element) => {
+    element.classList.toggle('selected', element.dataset.ticket === key);
+  });
+
+  Object.entries(inspector).forEach(([field, element]) => {
+    element.textContent = ticket[field];
+  });
+
+  simulateButton.classList.remove('success');
+  simulateButton.innerHTML = 'Simular próxima ação <span>→</span>';
 }
 
-demoTabs.forEach((tab) => {
-  tab.addEventListener('click', () => {
-    demoTabs.forEach((item) => item.setAttribute('aria-selected', String(item === tab)));
-    renderDemo(tab.dataset.demoTab);
+document.querySelectorAll('[data-ticket]').forEach((ticket) => {
+  ticket.addEventListener('click', () => selectTicket(ticket.dataset.ticket));
+});
+
+document.querySelectorAll('[data-filter]').forEach((filter) => {
+  filter.addEventListener('click', () => {
+    document.querySelectorAll('[data-filter]').forEach((item) => item.classList.toggle('active', item === filter));
+    document.querySelectorAll('[data-ticket]').forEach((ticket) => {
+      ticket.hidden = filter.dataset.filter !== 'all' && ticket.dataset.channel !== filter.dataset.filter;
+    });
   });
+});
+
+simulateButton.addEventListener('click', () => {
+  simulateButton.classList.add('success');
+  simulateButton.textContent = 'Ação simulada com sucesso';
 });
 
 const header = document.querySelector('[data-header]');
@@ -59,6 +76,6 @@ const observer = new IntersectionObserver((entries) => {
       observer.unobserve(entry.target);
     }
   });
-}, { threshold: 0.13 });
+}, { threshold: .1 });
 
 document.querySelectorAll('.reveal').forEach((element) => observer.observe(element));
