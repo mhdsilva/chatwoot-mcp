@@ -15,6 +15,8 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"chatwoot-mcp/internal/analytics"
+	"chatwoot-mcp/internal/chatwoot"
 	"chatwoot-mcp/internal/core"
 	"chatwoot-mcp/internal/service"
 )
@@ -142,15 +144,16 @@ type getConversationOutput struct {
 	ContentNotice      string            `json:"content_notice,omitempty"`
 }
 
-// Run serves the six v1 tools over newline-delimited MCP on stdin/stdout and
-// blocks until the session ends or ctx is cancelled.
-func Run(ctx context.Context, svc service.Service, stdin io.Reader, stdout io.Writer) error {
-	return run(ctx, svc, stdin, stdout, os.Stderr)
+// Run serves the v1 tools over newline-delimited MCP on stdin/stdout and
+// blocks until the session ends or ctx is cancelled. The operational service
+// and the analytics service must both be non-nil.
+func Run(ctx context.Context, svc service.Service, insights analytics.Service, stdin io.Reader, stdout io.Writer) error {
+	return run(ctx, svc, insights, stdin, stdout, os.Stderr)
 }
 
-func run(ctx context.Context, svc service.Service, stdin io.Reader, stdout io.Writer, diagnostics io.Writer) error {
+func run(ctx context.Context, svc service.Service, insights analytics.Service, stdin io.Reader, stdout io.Writer, diagnostics io.Writer) error {
 	logger := slog.New(slog.NewTextHandler(diagnostics, &slog.HandlerOptions{Level: slog.LevelWarn}))
-	server := newServerWithLogger(svc, logger)
+	server := newServerWithLogger(svc, insights, logger)
 	transport := &mcp.IOTransport{
 		Reader: readCloser{stdin},
 		Writer: writeCloser{stdout},
@@ -158,11 +161,11 @@ func run(ctx context.Context, svc service.Service, stdin io.Reader, stdout io.Wr
 	return server.Run(ctx, transport)
 }
 
-func newServer(svc service.Service) *mcp.Server {
-	return newServerWithLogger(svc, slog.New(slog.DiscardHandler))
+func newServer(svc service.Service, insights analytics.Service) *mcp.Server {
+	return newServerWithLogger(svc, insights, slog.New(slog.DiscardHandler))
 }
 
-func newServerWithLogger(svc service.Service, logger *slog.Logger) *mcp.Server {
+func newServerWithLogger(svc service.Service, insights analytics.Service, logger *slog.Logger) *mcp.Server {
 	if logger == nil {
 		logger = slog.New(slog.DiscardHandler)
 	}
@@ -282,6 +285,7 @@ func newServerWithLogger(svc service.Service, logger *slog.Logger) *mcp.Server {
 	registerOrganizationTools(server, svc)
 	registerRichMessageTools(server, svc)
 	registerContactTools(server, svc)
+	registerAnalyticsTools(server, insights)
 
 	return server
 }
@@ -300,20 +304,22 @@ func fail[T any](err error) (*mcp.CallToolResult, result[T], error) {
 // HTTP bodies can contain an unexpected secret, so the adapter emits a fixed,
 // useful human message chosen by the machine-readable code. The code is always
 // preserved exactly and the fixed messages stay well under MaxErrorBytes, which
-// makes the error output deterministic.
+// makes the error output deterministic. Safe HTTP diagnostics are read from the
+// wrapped *chatwoot.Error, which both the operational and the analytics errors
+// expose through Unwrap.
 func errorPayloadFrom(err error) (*errorPayload, bool) {
 	code := errorCodeOf(err)
-	payload, truncated := boundedError(string(code), fixedErrorMessage(code))
-	var svcErr *service.Error
-	if errors.As(err, &svcErr) && svcErr.APIError != nil && svcErr.APIError.StatusCode >= 100 && svcErr.APIError.StatusCode <= 599 {
-		payload.StatusCode = svcErr.APIError.StatusCode
-	}
-	if errors.As(err, &svcErr) && svcErr.APIError != nil {
-		payload.ResponseFormat = safeResponseFormat(svcErr.APIError.ResponseFormat)
-		payload.DecodeError = safeDecodeError(svcErr.APIError.ResponseDecodeKind)
-		payload.Field = safeFieldPath(svcErr.APIError.ResponseField)
-		payload.ExpectedType = safeJSONType(svcErr.APIError.ExpectedJSONType)
-		payload.ActualType = safeJSONType(svcErr.APIError.ActualJSONType)
+	payload, truncated := boundedError(code, fixedErrorMessage(code))
+	var apiErr *chatwoot.Error
+	if errors.As(err, &apiErr) && apiErr != nil {
+		if apiErr.StatusCode >= 100 && apiErr.StatusCode <= 599 {
+			payload.StatusCode = apiErr.StatusCode
+		}
+		payload.ResponseFormat = safeResponseFormat(apiErr.ResponseFormat)
+		payload.DecodeError = safeDecodeError(apiErr.ResponseDecodeKind)
+		payload.Field = safeFieldPath(apiErr.ResponseField)
+		payload.ExpectedType = safeJSONType(apiErr.ExpectedJSONType)
+		payload.ActualType = safeJSONType(apiErr.ActualJSONType)
 	}
 	return payload, truncated
 }
@@ -357,50 +363,60 @@ func safeDecodeError(value string) string {
 	}
 }
 
-func errorCodeOf(err error) service.Code {
+// errorCodeOf reports the machine-readable code of err as a stable string. It
+// recognizes both the operational service errors and the analytics errors;
+// anything else falls back to the timeout or upstream categories.
+func errorCodeOf(err error) string {
 	var svcErr *service.Error
 	if errors.As(err, &svcErr) {
-		return svcErr.Code
+		return string(svcErr.Code)
+	}
+	var analyticsErr *analytics.Error
+	if errors.As(err, &analyticsErr) {
+		return string(analyticsErr.Code)
 	}
 	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
-		return service.CodeTimeout
+		return string(service.CodeTimeout)
 	}
-	return service.CodeUpstream
+	return string(service.CodeUpstream)
 }
 
-// fixedErrorMessage maps a service code to a safe, actionable message. It must
-// not include any data from the failing request or response.
-func fixedErrorMessage(code service.Code) string {
+// fixedErrorMessage maps a machine-readable code to a safe, actionable message.
+// It must not include any data from the failing request or response. Service and
+// analytics codes share the same string values for the common categories.
+func fixedErrorMessage(code string) string {
 	switch code {
-	case service.CodeInvalidInput:
+	case string(service.CodeInvalidInput):
 		return "the request arguments are invalid; check the ids and text fields and try again"
-	case service.CodeCannotReply:
+	case string(service.CodeCannotReply):
 		return "the conversation cannot accept a reply right now"
-	case service.CodeConversationMismatch:
+	case string(service.CodeConversationMismatch):
 		return "the requested conversation id does not match the conversation returned by Chatwoot"
-	case service.CodeDeliveryUnknown:
+	case string(service.CodeDeliveryUnknown):
 		return "delivery is unknown; check the conversation before retrying"
-	case service.CodeChannelUnsupported:
+	case string(service.CodeChannelUnsupported):
 		return "the selected channel does not support this operation"
-	case service.CodeAttachmentTooLarge:
+	case string(service.CodeAttachmentTooLarge):
 		return "the attachment exceeds the size allowed for this channel"
-	case service.CodeTemplateNotFound:
+	case string(service.CodeTemplateNotFound):
 		return "the template is not among the approved templates for this inbox"
-	case service.CodeUnauthorized:
+	case string(service.CodeUnauthorized):
 		return "Chatwoot rejected the credentials; check the token configured in the panel"
-	case service.CodeForbidden:
+	case string(service.CodeForbidden):
 		return "the configured user is not allowed to perform this action"
-	case service.CodeNotFound:
+	case string(service.CodeNotFound):
 		return "the requested resource was not found; check the id"
-	case service.CodeRateLimited:
+	case string(service.CodeRateLimited):
 		return "Chatwoot rate limited the request; wait before trying again"
-	case service.CodeTimeout:
+	case string(service.CodeTimeout):
 		return "the request to Chatwoot timed out; try again"
-	case service.CodeUpstreamServer:
+	case string(service.CodeUpstreamServer):
 		return "Chatwoot returned a server error; the status code is included"
-	case service.CodeInvalidResponse:
+	case string(service.CodeInvalidResponse):
 		return "Chatwoot returned an unreadable response; safe response diagnostics are included"
-	case service.CodeUpstream:
+	case string(analytics.CodeUnsupportedFeature):
+		return "this analytics feature is not available in the configured Chatwoot version"
+	case string(service.CodeUpstream):
 		return "Chatwoot returned an unexpected error; check the connection and try again"
 	default:
 		return "the operation failed; check the connection and try again"
