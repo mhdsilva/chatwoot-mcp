@@ -86,6 +86,13 @@ jobs:
             "/DARCH=${{ matrix.goarch }}" `
             "packaging\windows\chatwoot-mcp.iss"
 
+      - name: Name bare binary for the release
+        shell: bash
+        run: |
+          ext=""
+          [ "${{ matrix.goos }}" = "windows" ] && ext=".exe"
+          mv "dist/chatwoot-mcp${ext}" "dist/chatwoot-mcp-${{ matrix.goos }}-${{ matrix.goarch }}${ext}"
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
