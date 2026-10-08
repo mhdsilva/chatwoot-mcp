@@ -179,6 +179,10 @@ type errorEnvelope struct {
 }
 
 func (c *Client) call(ctx context.Context, method, path string, query url.Values, reqBody, resBody any, resource string) error {
+	return c.callWithBearer(ctx, method, path, query, reqBody, resBody, resource, false)
+}
+
+func (c *Client) callWithBearer(ctx context.Context, method, path string, query url.Values, reqBody, resBody any, resource string, bearer bool) error {
 	var reader io.Reader
 	if reqBody != nil {
 		payload, err := json.Marshal(reqBody)
@@ -193,6 +197,9 @@ func (c *Client) call(ctx context.Context, method, path string, query url.Values
 		return &Error{Kind: KindRequest, Resource: resource, Message: err.Error()}
 	}
 	req.Header.Set("api_access_token", c.token)
+	if bearer {
+		req.Header.Set("Authorization", "Bearer "+c.token)
+	}
 	req.Header.Set("Accept", "application/json")
 	if reqBody != nil {
 		req.Header.Set("Content-Type", "application/json")
