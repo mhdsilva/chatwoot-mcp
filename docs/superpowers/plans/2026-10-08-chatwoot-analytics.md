@@ -302,6 +302,7 @@ git commit -m "feat(analytics): add bounded attention queue"
 - Create: `internal/analytics/reports.go`
 - Create: `internal/analytics/reports_test.go`
 - Modify: `internal/analytics/errors.go`
+- Modify: `internal/analytics/service.go` (replace the temporary reporting request/result placeholders and unsupported-feature stubs from Task 3)
 
 **Interfaces:**
 - Consumes: `core.ReportsAPI` and report types from Task 1; `analytics.Service` from Task 3.
