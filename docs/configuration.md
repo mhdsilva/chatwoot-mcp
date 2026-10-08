@@ -45,7 +45,9 @@ Uma configuração representa uma instalação Chatwoot e um `account_id`. O tok
 
 ## Clientes MCP
 
-O transporte local usa `stdio`. O cliente deve iniciar o executável com o argumento `mcp`, usando um caminho absoluto e estável. O bloco do cliente não contém o token: o processo lê o mesmo arquivo usado pelo painel. Consulte os exemplos para Claude Desktop e Codex no [README](../README.md#conectar-um-cliente-mcp-local).
+O transporte local usa `stdio`. O cliente deve iniciar o executável com o argumento `mcp`, usando um caminho absoluto e estável. O bloco do cliente não contém o token: o processo lê o mesmo arquivo usado pelo painel.
+
+O registro pode ser automático, pelo painel ou pelo comando `chatwoot-mcp configure-client --client claude|codex|all` (com confirmação e backup), ou manual, colando o bloco mostrado no painel. Consulte os exemplos para Claude Desktop e Codex no [README](../README.md#conectar-um-cliente-mcp-local) e a instalação em [installation.md](installation.md).
 
 ## Ferramentas disponíveis
 
